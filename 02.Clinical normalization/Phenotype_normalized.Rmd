@@ -1,0 +1,115 @@
+---
+title: "Clinical trait normalization and standlization"
+author: "TangChao"
+date: "2020/5/14"
+output: 
+  html_document:
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center')
+```
+
+### Content
+[0. Preparation data](#A)    
+[1. clinical features normalization and standlization](#B)    
+
+
+### 0. Preparation data{#A}
+
+```{r}
+library(data.table)
+library(readxl)
+library(openxlsx)
+
+pheno <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Clinical_traits.xlsx"))
+pheno[, Chinese := NULL]
+pheno[, `Full name` := NULL]
+pheno[, Unit := NULL]
+pheno[, `Functional classification` := NULL]
+
+rm <- pheno[, Trait]
+pheno <- t(as.data.frame(pheno[, -c("Trait")]))
+colnames(pheno) <- rm
+
+rm <- as.data.table(do.call(rbind, strsplit(row.names(pheno), "\\|")))
+colnames(rm) <- c("Name", "Gender")
+pheno <- cbind(rm, pheno)
+
+sichuan <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200429_Edited/Sichuan_20200228_V1.xlsx"))[, .(患者姓名, 性别, 年龄)]
+colnames(sichuan) <- c("Name", "Gender", "Age")
+sichuan[, Gender := ifelse(Gender == "男", "Male", "Female")]
+sichuan[, Age := as.numeric(Age)]
+
+pheno <- merge(sichuan, pheno, by = c("Name", "Gender"))
+
+openxlsx::write.xlsx(pheno, file = "/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Raw_pheno.xlsx")
+```
+
+
+### 1. clinical features normalization and standlization{#B}
+
+```{r}
+NormFun <- function(x) {
+  # y <- qnorm((rank(x, na.last = "keep") - 0.5)/sum(!is.na(x)))
+  bestNormalize::orderNorm(x)$x.t
+  # signif((y - mean(y)) / sd(y), 5)
+}
+```
+
+```{r}
+pt <- 4:ncol(pheno)
+
+library(caret)
+
+for(j in pt) {
+  Tab0 <- pheno[, c(2, 3, j), with = FALSE]
+  colnames(Tab0)[3] <- "before"
+  
+  # 1. inverse normal transformation 
+  Tab0[!is.na(before), Normal1 := NormFun(before)]
+  
+  # 2. remove points more than +-3 SD
+  Tab0[!is.na(Normal1), Type := ifelse(Normal1 < mean(Normal1) - 3*sd(Normal1) | Normal1 > mean(Normal1) + 3*sd(Normal1), "O", "I")]
+
+  # 3. inverse normal transformation on the rest points of the trait
+  Tab0[Type == "I", Normal2 := NormFun(before)]
+  Tab0[Type == "O", Normal2 := NA]
+  
+  # 4. Regress out confounding covariates, use stepwise linear regression
+  set.seed(123)
+  # Set up repeated k-fold cross-validation
+  train.control <- trainControl(method = "cv", number = 10)
+  # Train the model
+  Tab0[, beta0 := 1]
+  step.model <- train(Normal2 ~ beta0 + Age + Gender, data = Tab0[!is.na(Normal2), ],
+                      method = "leapSeq", 
+                      tuneGrid = data.frame(nvmax = 1:3),
+                      trControl = train.control)
+  
+  # 5. extract residuals after regression
+  Tab0[!is.na(Normal2), residuals := residuals(step.model)]
+  
+  # 6. Normalize extracted residuals
+  Tab0[!is.na(Normal2), after := NormFun(residuals)]
+  
+  pheno[[j]] <- Tab0$after
+  
+  rm(list = c("Tab0", "step.model"))
+  gc()
+}
+
+openxlsx::write.xlsx(pheno, file = "/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno.xlsx")
+Patient <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Patient_information.xlsx"))
+pheno_tu <- merge(Patient[, .(Name, Gender, PatientID)], pheno, by = c("Name", "Gender"))
+pheno_tu[, Name := NULL]
+pheno_tu[, Gender := NULL]
+pheno_tu[, Age := NULL]
+openxlsx::write.xlsx(pheno_tu, file = "/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno_tu.xlsx")
+```
+
+
+
+
+

@@ -1,0 +1,114 @@
+---
+title: "Clinical traits correlation"
+author: "TangChao"
+date: "2020/5/15"
+output: 
+  html_document:
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center')
+```
+
+### Content
+[0. Preparation data](#A)    
+[1. Correlation between genotypes and clinical phenotypes](#B)    
+
+### 0. Preparation data{#A}
+```{r}
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(ggplot2)
+library(ggpubr)
+library(ggpmisc)
+library(cowplot)
+
+Cutoff <- 0.2
+
+geno <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Genotype_Table.xlsx"))
+pheno <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno_tu.xlsx"))
+```
+
+### 1 Correlation between genotypes and clinical phenotypes{#B}
+
+```{r}
+NumericCorralateFunc <- function(Tab, i, j){
+  t.test.p <- tryCatch(t.test(y ~ Type, data = Tab)$p.value, error = function(e) NA)
+  wilcox.test.p <- tryCatch(wilcox.test(y ~ Type, data = Tab)$p.value, error = function(e) NA)
+  NN <- Tab[Type == "N", .N]
+  NY <- Tab[Type == "Y", .N]
+  Mean_N <- Tab[Type == "N", mean(y)]
+  Mean_Y <- Tab[Type == "Y", mean(y)]
+  
+  cort <- tryCatch(with(Tab, cor.test(x, y)), error = function(e) NULL)
+  cor_coe <- tryCatch(round(cort$estimate, 2), error = function(e) NA)
+  P_v <- tryCatch(cort$p.value, error = function(e) NA)
+  P_v <- ifelse(is.null(P_v), NA, P_v)
+  N <- tryCatch(nrow(Tab), error = function(e) NA)
+
+  cort <- tryCatch(with(Tab[Type == "Y", ], cor.test(x, y)), error = function(e) NULL)
+  cor_coe_cut <- tryCatch(round(cort$estimate, 2), error = function(e) NA)
+  P_v_cut <- tryCatch(cort$p.value, error = function(e) NA)
+  P_v_cut <- ifelse(is.null(P_v_cut), NA, P_v_cut)
+  N_cut <- tryCatch(nrow(Tab[Type == "Y", ]), error = function(e) NA)
+  
+  slope <- tryCatch(round(as.numeric(coef(lm(y ~ x, Tab))[2]), 2), error = function(e) NA)
+  slope_p <- tryCatch(coef(summary(lm(y ~ x, Tab)))[2, 4], error = function(e) NA)
+  slope_sd <- tryCatch(coef(summary(lm(y ~ x, Tab)))[2, 2], error = function(e) NA)
+  
+  slope_cut <- tryCatch(round(as.numeric(coef(lm(y ~ x, Tab[Type == "Y", ]))[2]), 2), error = function(e) NA)
+  slope_cut_p <- tryCatch(coef(summary(lm(y ~ x, Tab[Type == "Y", ])))[2, 4], error = function(e) NA)
+  slope_cut_sd <- tryCatch(coef(summary(lm(y ~ x, Tab[Type == "Y", ])))[2, 2], error = function(e) NA)
+  
+  slope_type <- tryCatch(round(as.numeric(coef(lm(y ~ factor(Type), Tab))[2]), 2), error = function(e) NA)
+  slope_type_p <- tryCatch(coef(summary(lm(y ~ factor(Type), Tab)))[2, 4], error = function(e) NA)
+  slope_type_sd <- tryCatch(coef(summary(lm(y ~ factor(Type), Tab)))[2, 2], error = function(e) NA)
+  
+  res <- data.table(NN = NN, 
+                    NY = NY, 
+                    Mean_N = Mean_N, 
+                    Mean_Y = Mean_Y, 
+                    t.test.p = t.test.p, 
+                    wilcox.test.p = wilcox.test.p, 
+                    CorCoef_all = cor_coe, 
+                    CorPva_all = P_v, 
+                    CorCoef_cutoff = cor_coe_cut, 
+                    CorPva_cutoff = P_v_cut, 
+                    slope_all = slope, 
+                    slope_all_Pva = slope_p,
+                    slope_all_Sd = slope_sd, 
+                    slope_cutoff = slope_cut, 
+                    slope_cutoff_Pva = slope_cut_p, 
+                    slope_cutoff_Sd = slope_cut_sd, 
+                    slope_category = slope_type, 
+                    slope_category_Pva = slope_type_p,
+                    slope_category_Sd = slope_type_sd, 
+                    PhenoType = colnames(pheno)[j], Genotype = colnames(geno)[i], Type = "continuous")
+  return(res)
+}
+```
+
+```{r}
+pt <- 2:ncol(pheno)
+gt <- 2:ncol(geno)
+
+library(parallel)
+
+mclapply(pt, function(j){
+  print(paste(j, "of", max(pt)))
+  do.call(rbind, lapply(gt, function(i){
+    # print(paste("      ", i, "of", max(gt)))
+    Tab <- na.omit(merge(geno[, c(1, i), with = F], pheno[, c(1, j), with = F], by = "PatientID"))
+    colnames(Tab)[2:3] <-  c("x", "y")
+    Tab[, Type := ifelse(x > Cutoff, "Y", "N")]
+    NumericCorralateFunc(Tab, i, j)
+  })) -> Cori
+  return(Cori)
+}, mc.cores = 1) -> Cor_res
+Cor_res <- do.call(rbind, Cor_res)
+
+openxlsx::write.xlsx(Cor_res, "/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/analysis/Clinical_Featuers/20200515_v1/Cor_res.xlsx")
+```
+

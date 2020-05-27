@@ -1,0 +1,247 @@
+---
+title: "Manhattan plot"
+author: "TangChao"
+date: "2020/5/15"
+output: 
+  html_document:
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center')
+```
+
+### Content
+[0. Preparation data](#A)    
+[1. Manhattan plot](#B)    
+[2. Genome structure](#C)    
+
+### 0. Preparation data{#A}
+```{r}
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(ggplot2)
+library(cowplot)
+library(ggrepel)
+Cor_res <- as.data.table(openxlsx::read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/analysis/Clinical_Featuers/20200515_v1/Cor_res.xlsx"))
+
+Cor_res_list <- split(Cor_res, Cor_res$PhenoType)
+
+Cor_res_list_tu <- Cor_res_list[c("ESR", "CRP", "LDH", "D-dimer")]
+
+lapply(Cor_res_list_tu, function(x) {
+  x[, t.test.fdr := p.adjust(t.test.p, method = "fdr")]
+  x[, CorFDR_all := p.adjust(CorPva_all, method = "fdr")]
+}) -> Cor_res_list_tu
+
+Cor_res_list_tu <- do.call(rbind, Cor_res_list_tu)
+
+Tab <- copy(Cor_res_list_tu)
+
+Func1 <- function(x) {
+  ifelse(grepl(":D", x), as.numeric(strsplit(x, "-")[[1]][1]), as.numeric(gsub("[ACGT]", "", x)))
+}
+
+Tab$start <- mapply(Tab$Genotype, FUN = Func1)
+
+Tab[, Z := Mean_Y - Mean_N]
+
+Tab[, Direction := ifelse(Mean_Y > Mean_N, "Up", "Down")]
+Tab[, Direction := factor(Direction, levels = c("Up", "Down"))]
+
+Tab[, Direction2 := ifelse(CorCoef_all > 0, "Postive", "Negative")]
+Tab[, Direction2 := factor(Direction2, levels = c("Postive", "Negative"))]
+```
+
+
+### 1. Manhattan plot{#B}
+
+##### Z value 
+```{r}
+ggplot(Tab[!is.na(t.test.fdr), ], aes(x = start, y = -log10(t.test.fdr), 
+                                    colour = Direction, shape = PhenoType, 
+                                    size = abs(Z))) + 
+  geom_point() + 
+  geom_text_repel(data = Tab[t.test.fdr < 0.05, ], aes(label = Genotype)) + 
+  guides(colour = guide_legend(override.aes = list(size = 5)), 
+         shape = guide_legend(override.aes = list(size = 5))) + 
+  scale_color_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1]) + 
+  labs(x = "Coordinate", y = "-log10(T-test FDR)") + 
+  # geom_hline(yintercept = -log10(0.05), lty = 2) + 
+  theme_classic() + 
+  theme(axis.title = element_text(size = 22), 
+        axis.text = element_text(size = 16), 
+        legend.title = element_text(size = 22), 
+        legend.text = element_text(size = 16)) -> p1
+
+
+ggplot(Tab[!is.na(t.test.p), ], aes(x = start, y = -log10(t.test.p), 
+                                      colour = Direction, shape = PhenoType, 
+                                      size = abs(Z))) + 
+  geom_point() + 
+  geom_text_repel(data = Tab[t.test.p < 0.05, ], aes(label = Genotype)) + 
+  guides(colour = guide_legend(override.aes = list(size = 5)), 
+         shape = guide_legend(override.aes = list(size = 5))) + 
+  scale_color_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1]) + 
+  labs(x = "Coordinate", y = "-log10(T-test P)") + 
+  # geom_hline(yintercept = -log10(0.05), lty = 2) + 
+  theme_classic() + 
+  theme(axis.title = element_text(size = 22), 
+        axis.text = element_text(size = 16), 
+        legend.title = element_text(size = 22), 
+        legend.text = element_text(size = 16)) -> p2
+```
+
+T-test FDR of Z value
+```{r fig.width=12, fig.height=6}
+p1
+```
+
+T-test P value of Z value
+```{r fig.width=12, fig.height=6}
+p2
+```
+
+
+##### Cor coef
+```{r}
+ggplot(Tab, aes(x = start, y = -log10(CorFDR_all), 
+                colour = Direction2, 
+                shape = PhenoType, 
+                size = abs(CorCoef_all))) + 
+  geom_point() + 
+  geom_text_repel(data = Tab[CorFDR_all < 0.05, ], aes(label = Genotype)) + 
+  scale_color_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1]) + 
+  guides(colour = guide_legend(title = "Direction", override.aes = list(size = 5)), 
+         shape = guide_legend(override.aes = list(size = 5)), 
+         size = guide_legend("abs(beta)")) + 
+  labs(x = "Coordinate", y = "-log10(Correlation FDR)") + 
+  # geom_hline(yintercept = -log10(0.05), lty = 2) + 
+  theme_classic() + 
+  theme(axis.title = element_text(size = 22), 
+        axis.text = element_text(size = 16), 
+        legend.title = element_text(size = 22), 
+        legend.text = element_text(size = 16)) -> p3
+
+
+ggplot(Tab, aes(x = start, y = -log10(CorPva_all), 
+                colour = Direction2, 
+                shape = PhenoType, 
+                size = abs(CorCoef_all))) + 
+  geom_point() + 
+  geom_text_repel(data = Tab[CorPva_all < 0.05, ], aes(label = Genotype)) + 
+  scale_color_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1]) + 
+  guides(colour = guide_legend(title = "Direction", override.aes = list(size = 5)), 
+         shape = guide_legend(override.aes = list(size = 5)), 
+         size = guide_legend("abs(beta)")) + 
+  labs(x = "Coordinate", y = "-log10(Correlation P)") + 
+  # geom_hline(yintercept = -log10(0.05), lty = 2) + 
+  theme_classic() + 
+  theme(axis.title = element_text(size = 22), 
+        axis.text = element_text(size = 16), 
+        legend.title = element_text(size = 22), 
+        legend.text = element_text(size = 16)) -> p4
+```
+
+Correlation FDR
+```{r fig.width=12, fig.height=6}
+p3
+```
+
+Correlation P value
+```{r fig.width=12, fig.height=6}
+p4
+```
+
+### 2. Genome structure{#C}
+
+```{r}
+library(ape)
+library(stringr)
+gff <- read.gff("/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/data/reference/MN908947.genome.gff")
+gff <- gff[gff$type == "gene", ]
+
+gff$Gene <- sapply(gff$attributes, function(x) {
+  x = str_split(x, ";")[[1]]
+  
+  for (i in x) {
+    if (str_detect(i, "Name")) {
+      i = str_split(i, "=")[[1]]
+      return(i[2])
+    }
+  }
+})
+gff$Gene = as.character(gff$Gene)
+
+gff$molecule = "Ref"
+
+gff$direction = sapply(gff$strand, function(x) { ifelse(x == "+", 1, -1) })
+gff$strand = sapply(gff$strand, function(x) { ifelse(x == "+", "forward", "reverse") })
+gff$Gene <- factor(gff$Gene, levels = gff$Gene)
+
+
+library(gggenes)
+p0 <- ggplot(gff, aes(xmin = start, xmax = end, y = molecule, fill = Gene, label = Gene)) +
+  geom_gene_arrow(arrowhead_height = unit(3, "mm"), 
+                  arrowhead_width = unit(1, "mm")) +
+  # geom_gene_label(align = "centre") +
+  # geom_blank(data = dummies) +
+  facet_wrap(~ molecule, scales = "free", ncol = 1) +
+  scale_fill_manual(values = RColorBrewer::brewer.pal(n = 11, name = "Paired")) +
+  theme_genes() +
+  theme(
+    legend.position = "top", 
+    legend.text = element_text(size = 16), 
+    legend.title = element_text(size = 22), 
+    axis.line.x = element_line(), 
+    axis.title.y = element_blank(),
+    axis.text = element_text(size = 16), 
+    axis.title = element_text(size = 22)
+  ) + 
+  scale_x_continuous(breaks = c(seq(0, 30000, 5000)), position = "top") + 
+  guides(fill = guide_legend(nrow = 1))
+```
+
+```{r}
+library(ggpubr)
+
+p01 <- ggdraw(insert_xaxis_grob(p1, p0, position = "top", grid::unit(0.2, "null")))
+leg <- get_legend(p0)
+pg01 <- cowplot::plot_grid(as_ggplot(leg), p01, ncol = 1, rel_heights = c(1, 10))
+
+p02 <- ggdraw(insert_xaxis_grob(p2, p0, position = "top", grid::unit(0.2, "null")))
+pg02 <- cowplot::plot_grid(as_ggplot(leg), p02, ncol = 1, rel_heights = c(1, 10))
+
+p03 <- ggdraw(insert_xaxis_grob(p3, p0, position = "top", grid::unit(0.2, "null")))
+pg03 <- cowplot::plot_grid(as_ggplot(leg), p03, ncol = 1, rel_heights = c(1, 10))
+
+p04 <- ggdraw(insert_xaxis_grob(p4, p0, position = "top", grid::unit(0.2, "null")))
+pg04 <- cowplot::plot_grid(as_ggplot(leg), p04, ncol = 1, rel_heights = c(1, 10))
+```
+
+```{r fig.width=12, fig.height=6}
+ggstatsplot::combine_plots(pg01, labels = "a", label_size = 22)
+ggstatsplot::combine_plots(pg03, labels = "b", label_size = 22)
+ggstatsplot::combine_plots(pg02, labels = "a", label_size = 22)
+ggstatsplot::combine_plots(pg04, labels = "b", label_size = 22)
+```
+
+```{r}
+ggstatsplot::combine_plots(pg04, labels = "b", label_size = 22)
+ggsave(filename = "./Fig4/B.pdf", width = 12, height = 6)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

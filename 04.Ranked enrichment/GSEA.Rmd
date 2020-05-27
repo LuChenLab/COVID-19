@@ -1,0 +1,1212 @@
+---
+title: "GSEA"
+author: "TangChao"
+date: "2020/5/21"
+output: 
+  html_document:
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center')
+```
+
+### Content
+[0. Preparation data](#A)    
+[1. Clinical traits difference between severe and nonsevere](#B)    
+[2. plot of Grading-Pheno](#C)    
+[3. GSEA](#D)    
+[3.1 Cor Coef](#E)    
+[3.2 Mean_Y - Mean_N](#F)    
+
+
+### 0. Preparation data{#A}
+```{r echo=FALSE}
+library(data.table)
+library(readxl)
+library(openxlsx)
+library(ggplot2)
+library(RColorBrewer)
+library(S4Vectors)
+
+geno <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Genotype_Table.xlsx"))
+
+patient <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Patient_information.xlsx"))
+
+Cutoff <- 0.2
+```
+
+### 1. Clinical traits difference between severe and nonsevere{#B}
+##### T-test in all data
+```{r echo=FALSE}
+pheno <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno.xlsx"))
+Sichuan <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Sichuan_20200228_V1.xlsx"))[, .(Name, Gender, Type)]
+
+pt <- 3:ncol(pheno)
+
+lapply(pt, function(j) {
+  Tab <- na.omit(merge(pheno[, c(1, 2, j), with = F], Sichuan, by = c("Name", "Gender")))
+  colnames(Tab)[3:4] <- c("y", "Grading")
+  Tab[, Grading := factor(Grading, levels = c("Nonsevere", "Severe"))]
+  
+  Gendert <- tryCatch(t.test(y ~ Grading, Tab)$p.value, error = function(e) NA)
+  N_Severe <- Tab[Grading == "Severe", .N]
+  N_Nonsevere <- Tab[Grading == "Nonsevere", .N]
+  Mean_Severe <- Tab[Grading == "Severe", mean(y)]
+  Mean_Nonsevere <- Tab[Grading == "Nonsevere", mean(y)]
+  Z <- Mean_Severe - Mean_Nonsevere
+  data.table(N_Severe = N_Severe, Mean_Severe = Mean_Severe, N_Nonsevere = N_Nonsevere, Mean_Nonsevere = Mean_Nonsevere, Z = Z, T.test.P = Gendert, Phenotype = colnames(pheno)[j])
+}) -> Grading_Pheno_Test0
+Grading_Pheno_Test0 <- do.call(rbind, Grading_Pheno_Test0)
+setkey(Grading_Pheno_Test0, Phenotype)
+```
+
+##### T-test in our data
+```{r echo=FALSE}
+pheno <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno.xlsx"))
+pheno[, Age := NULL]
+pt <- 3:ncol(pheno)
+
+lapply(pt, function(j) {
+  Tab <- na.omit(merge(pheno[, c(1, 2, j), with = F], patient[, .(Name, Gender, Type)], by = c("Name", "Gender")))
+  colnames(Tab)[3:4] <- c("y", "Grading")
+  
+  Gendert <- tryCatch(t.test(y ~ Grading, Tab)$p.value, error = function(e) NA)
+  N_Severe <- Tab[Grading == "Severe", .N]
+  N_Nonsevere <- Tab[Grading == "Nonsevere", .N]
+  Mean_Severe <- Tab[Grading == "Severe", mean(y)]
+  Mean_Nonsevere <- Tab[Grading == "Nonsevere", mean(y)]
+  Z <- Mean_Severe - Mean_Nonsevere
+  data.table(N_Severe = N_Severe, Mean_Severe = Mean_Severe, N_Nonsevere = N_Nonsevere, Mean_Nonsevere = Mean_Nonsevere, Z = Z, T.test.P = Gendert, Phenotype = colnames(pheno)[j])
+}) -> Grading_Pheno_Test
+Grading_Pheno_Test <- do.call(rbind, Grading_Pheno_Test)
+setkey(Grading_Pheno_Test, Phenotype)
+openxlsx::write.xlsx(Grading_Pheno_Test, "./Grading_Pheno_Test.xlsx")
+```
+
+```{r}
+classify <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Clinical_traits.xlsx"))[, .(Trait, `Functional classification`)]
+colnames(classify) <- c("Trait", "Function")
+Cor_res <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/analysis/Clinical_Featuers/20200515_v1/Cor_res.xlsx"))
+Cor_res[, PhenoType := gsub("\\.", " ", PhenoType)]
+```
+
+### 2. plot of Grading-Pheno{#C}
+```{r fig.width=6, fig.height=12}
+Grading_Pheno_Test2 <- merge(Grading_Pheno_Test0, classify, by.x = "Phenotype", by.y = "Trait")
+
+setkey(Grading_Pheno_Test2, Z)
+Grading_Pheno_Test2[, Phenotype := factor(Phenotype, levels = Phenotype)]
+Grading_Pheno_Test2[, Significant := ifelse(T.test.P < 0.05, "Y", "N")]
+ggplot(Grading_Pheno_Test2[!is.na(T.test.P), ], aes(x = Phenotype, y = Z, colour = Significant)) + 
+  geom_point() + 
+  coord_flip() + 
+  theme_classic() -> p1
+```
+
+
+```{r fig.width=6, fig.height=12}
+Grading_Pheno_Test3 <- merge(Grading_Pheno_Test, classify, by.x = "Phenotype", by.y = "Trait")
+
+setkey(Grading_Pheno_Test3, Z)
+Grading_Pheno_Test3[, Phenotype := factor(Phenotype, levels = Phenotype)]
+Grading_Pheno_Test3[, Significant := ifelse(T.test.P < 0.05, "Y", "N")]
+ggplot(Grading_Pheno_Test3[!is.na(T.test.P), ], aes(x = Phenotype, y = Z, colour = Significant)) + 
+  geom_point() + 
+  coord_flip() + 
+  theme_classic() -> p2
+```
+
+
+```{r fig.width=12, fig.height=12}
+# cowplot::plot_grid(p1, p2)
+ggstatsplot::combine_plots(p1 + labs(title = "All Sichuan"), p2 + labs(title = "Our selected"))
+```
+
+#### High in Severe 
+```{r}
+Grading_Pheno_Test2[T.test.P < 0.05 & Z > 0.5, ]
+Grading_Pheno_Test3[T.test.P < 0.05 & Z > 0.5, ]
+```
+
+#### High in Nonsevere 
+```{r}
+Grading_Pheno_Test2[T.test.P < 0.05 & Z < -0.5, ]
+Grading_Pheno_Test3[T.test.P < 0.05 & Z < -0.5, ]
+```
+
+
+
+
+```{r}
+my_gsets <- list(Severe = c("CRP", "D-dimer", "FIB", "GLU", "Granulocyte", "hs-CRP", "Monocyte", "Respiratory frequency", "Systolic pressure", "ESR", "LDH"), 
+                 Nonsevere = c("Alb/Glb", "CD3+", "CD3+CD4+", "CD3+CD8+", "CD8+", "Ca", "IFN-b", "LYMPH%"))
+mapply(length, my_gsets)
+my_gsets
+```
+
+### 3. GSEA{#D}
+
+```{r}
+library(clusterProfiler)
+library(DOSE)
+library(openxlsx)
+library(doMC)
+library(enrichplot)
+```
+
+```{r}
+##' extract gsea result of selected geneSet
+##'
+##'
+##' @title gsInfo
+##' @param object gseaResult object
+##' @param geneSetID gene set ID
+##' @return data.frame
+##' @author Guangchuang Yu
+## @export
+gsInfo <- function(object, geneSetID) {
+    geneList <- object@geneList
+
+    if (is.numeric(geneSetID))
+        geneSetID <- object@result[geneSetID, "ID"]
+
+    geneSet <- object@geneSets[[geneSetID]]
+    exponent <- object@params[["exponent"]]
+    df <- gseaScores(geneList, geneSet, exponent, fortify=TRUE)
+    df$ymin=0
+    df$ymax=0
+    pos <- df$position == 1
+    h <- diff(range(df$runningScore))/20
+    df$ymin[pos] <- -h
+    df$ymax[pos] <- h
+    df$geneList <- geneList
+
+    df$Description <- object@result[geneSetID, "Description"]
+    return(df)
+}
+
+gseaScores <- getFromNamespace("gseaScores", "DOSE")
+
+
+##' plot table
+##'
+##'
+##' @title ggtable
+##' @param d data frame
+##' @param p ggplot object to extract color to color rownames(d), optional
+##' @return ggplot object
+##' @importFrom ggplotify as.ggplot
+##' @export
+##' @author guangchuang yu
+ggtable <- function(d, p = NULL) {
+    as.ggplot(tableGrob2(d, p))
+}
+
+##' @importFrom grid gpar
+##' @importFrom gridExtra tableGrob
+##' @importFrom ggplot2 ggplot_build
+tableGrob2 <- function(d, p = NULL) {
+    d <- d[order(rownames(d)),]
+    tp <- tableGrob(d)
+    if (is.null(p)) {
+        return(tp)
+    }
+    pcol <- unique(ggplot_build(p)$data[[1]][["colour"]])
+    j <- which(tp$layout$name == "rowhead-fg")
+
+    for (i in seq_along(pcol)) {
+        tp$grobs[j][[i+1]][["gp"]] = gpar(col = pcol[i])
+    }
+    return(tp)
+}
+```
+
+```{r}
+gseaplot3 <- function(x, geneSetID, title = "", color="green", base_size = 11,
+                      rel_heights=c(1.5, .5, 1), subplots = 1:3, pvalue_table = TRUE, ES_geom="line") {
+    
+    library(ggplot2)
+    library(gridExtra)
+    library(grid)
+    library(RColorBrewer)
+    
+    ES_geom <- match.arg(ES_geom, c("line", "dot"))
+
+    geneList <- position <- NULL ## to satisfy codetool
+
+    if (length(geneSetID) == 1) {
+        gsdata <- gsInfo(x, geneSetID)
+    } else {
+        gsdata <- do.call(rbind, lapply(geneSetID, gsInfo, object = x))
+    }
+
+    p <- ggplot(gsdata, aes_(x = ~x)) + xlab(NULL) +
+        theme_classic(base_size) +
+        theme(panel.grid.major = element_line(colour = "grey92"),
+              panel.grid.minor = element_line(colour = "grey92"),
+              panel.grid.major.y = element_blank(),
+              panel.grid.minor.y = element_blank()) +
+        scale_x_continuous(expand=c(0,0))
+
+    if (ES_geom == "line") {
+        es_layer <- geom_line(aes_(y = ~runningScore, color= ~Description), size=1)
+    } else {
+        es_layer <- geom_point(aes_(y = ~runningScore, color= ~Description), size=1, data = subset(gsdata, position == 1))
+    }
+
+    p.res <- p + es_layer +
+        theme(legend.position = c(.8, .8), legend.title = element_blank(),
+              legend.background = element_rect(fill = "transparent"))
+
+    p.res <- p.res + ylab("Running Enrichment Score") +
+        theme(axis.text.x=element_blank(),
+              axis.ticks.x=element_blank(),
+              axis.line.x=element_blank(),
+              plot.margin=margin(t=.2, r = .2, b=0, l=.2, unit="cm")) +
+        labs(subtitle = gsdata$Description[1])
+
+    i <- 0
+    for (term in unique(gsdata$Description)) {
+        idx <- which(gsdata$ymin != 0 & gsdata$Description == term)
+        gsdata[idx, "ymin"] <- i
+        gsdata[idx, "ymax"] <- i + 1
+        i <- i + 1
+    }
+    p2 <- ggplot(gsdata, aes_(x = ~x)) +
+        geom_linerange(aes_(ymin=~ymin, ymax=~ymax, color=~Description)) +
+        xlab(NULL) + ylab(NULL) + theme_classic(base_size) +
+        theme(legend.position = "none",
+              plot.margin = margin(t=-.1, b=0,unit="cm"),
+              axis.ticks = element_blank(),
+              axis.text = element_blank(),
+              axis.line.x = element_blank()) +
+        scale_x_continuous(expand=c(0,0)) +
+        scale_y_continuous(expand=c(0,0))
+
+    if (length(geneSetID) == 1) {
+        ## geneList <- gsdata$geneList
+        ## j <- which.min(abs(geneList))
+        ## v1 <- quantile(geneList[1:j], seq(0,1, length.out=6))[1:5]
+        ## v2 <- quantile(geneList[j:length(geneList)], seq(0,1, length.out=6))[1:5]
+
+        ## v <- sort(c(v1, v2))
+        ## inv <- findInterval(geneList, v)
+
+        v <- seq(1, sum(gsdata$position), length.out=9)
+        inv <- findInterval(rev(cumsum(gsdata$position)), v)
+        if (min(inv) == 0) inv <- inv + 1
+
+        col=c(rev(brewer.pal(5, "Blues")), brewer.pal(5, "Reds"))
+
+        ymin <- min(p2$data$ymin)
+        yy <- max(p2$data$ymax - p2$data$ymin) * .3
+        xmin <- which(!duplicated(inv))
+        xmax <- xmin + as.numeric(table(inv)[unique(inv)])
+        d <- data.frame(ymin = ymin, ymax = yy,
+                        xmin = xmin,
+                        xmax = xmax,
+                        col = col[unique(inv)])
+        p2 <- p2 + geom_rect(
+                       aes_(xmin=~xmin,
+                            xmax=~xmax,
+                            ymin=~ymin,
+                            ymax=~ymax,
+                            fill=~I(col)),
+                       data=d,
+                       alpha=.9,
+                       inherit.aes=FALSE)
+    }
+
+    ## p2 <- p2 +
+    ## geom_rect(aes(xmin=x-.5, xmax=x+.5, fill=geneList),
+    ##           ymin=ymin, ymax = ymin + yy, alpha=.5) +
+    ## theme(legend.position="none") +
+    ## scale_fill_gradientn(colors=color_palette(c("blue", "red")))
+
+    df2 <- p$data #data.frame(x = which(p$data$position == 1))
+    df2$y <- p$data$geneList[df2$x]
+    p.pos <- p + geom_segment(data=df2, aes_(x=~x, xend=~x, y=~y, yend=0), color="grey")
+    p.pos <- p.pos + ylab("Ranked list metric") +
+        xlab("Rank in Ordered Dataset") +
+        theme(plot.margin=margin(t = -.1, r = .2, b=.2, l=.2, unit="cm"))
+
+    if (!is.null(title) && !is.na(title) && title != "")
+        p.res <- p.res + ggtitle(title)
+
+    if (length(color) == length(geneSetID)) {
+        p.res <- p.res + scale_color_manual(values=color)
+        if (length(color) == 1) {
+            p.res <- p.res + theme(legend.position = "none")
+            p2 <- p2 + scale_color_manual(values = "black")
+        } else {
+            p2 <- p2 + scale_color_manual(values = color)
+        }
+    }
+
+    if (pvalue_table) {
+        pd <- x[geneSetID, c("Description", "pvalue", "p.adjust")]
+        pd <- pd[order(pd[,1], decreasing=FALSE),]
+        rownames(pd) <- "" # pd$Description
+
+        pd <- pd[,-1]
+        pd <- round(pd, 4)
+
+        tp <- tableGrob2(pd, p.res)
+
+        p.res <- p.res + theme(legend.position = "none") +
+            annotation_custom(tp,
+                              xmin = quantile(p.res$data$x, .5),
+                              xmax = quantile(p.res$data$x, .95),
+                              ymin = quantile(p.res$data$runningScore, .75),
+                              ymax = quantile(p.res$data$runningScore, .9))
+    }
+
+
+    plotlist <- list(p.res, p2, p.pos)[subplots]
+    n <- length(plotlist)
+    plotlist[[n]] <- plotlist[[n]] +
+        theme(axis.line.x = element_line(),
+              axis.ticks.x=element_line(),
+              axis.text.x = element_text())
+
+    if (length(subplots) == 1)
+        return(plotlist[[1]] + theme(plot.margin=margin(t=.2, r = .2, b=.2, l=.2, unit="cm")))
+
+
+    if (length(rel_heights) > length(subplots))
+        rel_heights <- rel_heights[subplots]
+
+    plot_grid(plotlist = plotlist, ncol=1, align="v", rel_heights=rel_heights)
+}
+
+
+
+MygsInfo <- function(geneSet, geneList, exponent = 1, Description) {
+  df <- gseaScores(geneList, geneSet, exponent, fortify = TRUE)
+  
+  df$ymin = 0
+  df$ymax = 0
+  pos <- df$position == 1
+  h <- diff(range(df$runningScore))/20
+  df$ymin[pos] <- -h
+  df$ymax[pos] <- h
+  df$geneList <- geneList
+  
+  df$Description <- Description
+  return(df)
+}
+
+
+
+gseaplot4 <- function(x, gsdata, SetName, title = "", color="green", base_size = 11,
+                      rel_heights=c(1.5, .5, 1), subplots = 1:3, pvalue_table = TRUE, ES_geom="line") {
+  x <- as.data.table(x)
+  library(data.table)
+  x[, ID := pathway]
+  x[, Description := pathway]
+  setnames(x, "size", "setSize")
+  setnames(x, "ES", "enrichmentScore")
+  setnames(x, "pval", "pvalue")
+  setnames(x, "padj", "p.adjust")
+  x[, qvalues := NA]
+  x[, leadingEdge := NULL]
+  x <- setDF(x, rownames = x[[1]])
+  
+  library(ggplot2)
+  library(gridExtra)
+  library(grid)
+  library(RColorBrewer)
+  
+  ES_geom <- match.arg(ES_geom, c("line", "dot"))
+  
+  geneList <- position <- NULL ## to satisfy codetool
+  
+  p <- ggplot(gsdata, aes_(x = ~x)) + xlab(NULL) +
+    theme_classic(base_size) +
+    theme(panel.grid.major = element_line(colour = "grey92"),
+          panel.grid.minor = element_line(colour = "grey92"),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank()) +
+    scale_x_continuous(expand=c(0,0))
+  
+  if (ES_geom == "line") {
+    es_layer <- geom_line(aes_(y = ~runningScore, color= ~Description), size=1)
+  } else {
+    es_layer <- geom_point(aes_(y = ~runningScore, color= ~Description), size=1, data = subset(gsdata, position == 1))
+  }
+  
+  p.res <- p + es_layer +
+    theme(legend.position = c(.8, .8), legend.title = element_blank(),
+          legend.background = element_rect(fill = "transparent"))
+  
+  p.res <- p.res + ylab("Running Enrichment Score") +
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(),
+          axis.line.x=element_blank(),
+          plot.margin=margin(t=.2, r = .2, b=0, l=.2, unit="cm")) +
+    labs(subtitle = gsdata$Description[1])
+  
+  i <- 0
+  for (term in unique(gsdata$Description)) {
+    idx <- which(gsdata$ymin != 0 & gsdata$Description == term)
+    gsdata[idx, "ymin"] <- i
+    gsdata[idx, "ymax"] <- i + 1
+    i <- i + 1
+  }
+  p2 <- ggplot(gsdata, aes_(x = ~x)) +
+    geom_linerange(aes_(ymin=~ymin, ymax=~ymax, color=~Description)) +
+    xlab(NULL) + ylab(NULL) + theme_classic(base_size) +
+    theme(legend.position = "none",
+          plot.margin = margin(t=-.1, b=0,unit="cm"),
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          axis.line.x = element_blank()) +
+    scale_x_continuous(expand=c(0,0)) +
+    scale_y_continuous(expand=c(0,0))
+  
+  if (length(geneSetID) == 1) {
+    ## geneList <- gsdata$geneList
+    ## j <- which.min(abs(geneList))
+    ## v1 <- quantile(geneList[1:j], seq(0,1, length.out=6))[1:5]
+    ## v2 <- quantile(geneList[j:length(geneList)], seq(0,1, length.out=6))[1:5]
+    
+    ## v <- sort(c(v1, v2))
+    ## inv <- findInterval(geneList, v)
+    
+    v <- seq(1, sum(gsdata$position), length.out=9)
+    inv <- findInterval(rev(cumsum(gsdata$position)), v)
+    if (min(inv) == 0) inv <- inv + 1
+    
+    col=c(rev(brewer.pal(5, "Blues")), brewer.pal(5, "Reds"))
+    
+    ymin <- min(p2$data$ymin)
+    yy <- max(p2$data$ymax - p2$data$ymin) * .3
+    xmin <- which(!duplicated(inv))
+    xmax <- xmin + as.numeric(table(inv)[unique(inv)])
+    d <- data.frame(ymin = ymin, ymax = yy,
+                    xmin = xmin,
+                    xmax = xmax,
+                    col = col[unique(inv)])
+    p2 <- p2 + geom_rect(
+      aes_(xmin=~xmin,
+           xmax=~xmax,
+           ymin=~ymin,
+           ymax=~ymax,
+           fill=~I(col)),
+      data=d,
+      alpha=.9,
+      inherit.aes=FALSE)
+  }
+  
+  ## p2 <- p2 +
+  ## geom_rect(aes(xmin=x-.5, xmax=x+.5, fill=geneList),
+  ##           ymin=ymin, ymax = ymin + yy, alpha=.5) +
+  ## theme(legend.position="none") +
+  ## scale_fill_gradientn(colors=color_palette(c("blue", "red")))
+  
+  df2 <- p$data #data.frame(x = which(p$data$position == 1))
+  df2$y <- p$data$geneList[df2$x]
+  p.pos <- p + geom_segment(data=df2, aes_(x=~x, xend=~x, y=~y, yend=0), color="grey")
+  p.pos <- p.pos + ylab("Ranked list metric") +
+    xlab("Rank in Ordered Dataset") +
+    theme(plot.margin=margin(t = -.1, r = .2, b=.2, l=.2, unit="cm"))
+  
+  if (!is.null(title) && !is.na(title) && title != "")
+    p.res <- p.res + ggtitle(title)
+  
+  if (length(color) == length(geneSetID)) {
+    p.res <- p.res + scale_color_manual(values=color)
+    if (length(color) == 1) {
+      p.res <- p.res + theme(legend.position = "none")
+      p2 <- p2 + scale_color_manual(values = "black")
+    } else {
+      p2 <- p2 + scale_color_manual(values = color)
+    }
+  }
+  
+  if (pvalue_table) {
+    pd <- x[SetName, c("Description", "pvalue", "p.adjust")]
+    pd <- pd[order(pd[,1], decreasing=FALSE),]
+    rownames(pd) <- "" # pd$Description
+    
+    pd <- pd[,-1]
+    pd <- round(pd, 4)
+    
+    tp <- tableGrob2(pd, p.res)
+    
+    p.res <- p.res + theme(legend.position = "none") +
+      annotation_custom(tp,
+                        xmin = quantile(p.res$data$x, .5),
+                        xmax = quantile(p.res$data$x, .95),
+                        ymin = quantile(p.res$data$runningScore, .75),
+                        ymax = quantile(p.res$data$runningScore, .9))
+  }
+  
+  
+  plotlist <- list(p.res, p2, p.pos)[subplots]
+  n <- length(plotlist)
+  plotlist[[n]] <- plotlist[[n]] +
+    theme(axis.line.x = element_line(),
+          axis.ticks.x=element_line(),
+          axis.text.x = element_text())
+  
+  if (length(subplots) == 1)
+    return(plotlist[[1]] + theme(plot.margin=margin(t=.2, r = .2, b=.2, l=.2, unit="cm")))
+  
+  
+  if (length(rel_heights) > length(subplots))
+    rel_heights <- rel_heights[subplots]
+  
+  plot_grid(plotlist = plotlist, ncol=1, align="v", rel_heights=rel_heights)
+}
+
+gseaplot5 <- function(x, gsdata, title = "", color="green", SetName, base_size = 11, geneSetID = 1,
+                      rel_heights=c(1.5, .5, 1), subplots = 1:3, pvalue_table = TRUE, ES_geom="line") {
+  x <- as.data.table(x)
+  library(data.table)
+  x[, ID := pathway]
+  x[, Description := pathway]
+  setnames(x, "size", "setSize")
+  setnames(x, "ES", "enrichmentScore")
+  setnames(x, "pval", "pvalue")
+  setnames(x, "padj", "p.adjust")
+  x[, qvalues := NA]
+  x[, leadingEdge := NULL]
+  x <- setDF(x, rownames = x[[1]])
+  
+  library(ggplot2)
+  library(gridExtra)
+  library(grid)
+  library(RColorBrewer)
+  
+  ES_geom <- match.arg(ES_geom, c("line", "dot"))
+  
+  geneList <- position <- NULL ## to satisfy codetool
+  
+  p <- ggplot(gsdata, aes_(x = ~x)) + xlab(NULL) +
+    theme_classic(base_size) +
+    theme(panel.grid.major = element_line(colour = "grey92"),
+          panel.grid.minor = element_line(colour = "grey92"),
+          panel.grid.major.y = element_blank(),
+          panel.grid.minor.y = element_blank()) +
+    scale_x_continuous(expand=c(0,0))
+  
+  if (ES_geom == "line") {
+    es_layer <- geom_line(aes_(y = ~runningScore, color= ~Description), size=1)
+  } else {
+    es_layer <- geom_point(aes_(y = ~runningScore, color= ~Description), size=1, data = subset(gsdata, position == 1))
+  }
+  
+  p.res <- p + es_layer +
+    theme(legend.position = c(.8, .8), legend.title = element_blank(),
+          legend.background = element_rect(fill = "transparent"))
+  
+  p.res <- p.res + ylab("Running Enrichment Score") +
+    theme(axis.text.x=element_blank(),
+          axis.ticks.x=element_blank(),
+          axis.line.x=element_blank(),
+          plot.margin=margin(t=.2, r = .2, b=0, l=.2, unit="cm")) +
+    labs(subtitle = gsdata$Description[1])
+  
+  i <- 0
+  for (term in unique(gsdata$Description)) {
+    idx <- which(gsdata$ymin != 0 & gsdata$Description == term)
+    gsdata[idx, "ymin"] <- i
+    gsdata[idx, "ymax"] <- i + 1
+    i <- i + 1
+  }
+  p2 <- ggplot(gsdata, aes_(x = ~x)) +
+    geom_linerange(aes_(ymin=~ymin, ymax=~ymax, color=~Description)) +
+    xlab(NULL) + ylab(NULL) + theme_classic(base_size) +
+    theme(legend.position = "none",
+          plot.margin = margin(t=-.1, b=0,unit="cm"),
+          axis.ticks = element_blank(),
+          axis.text = element_blank(),
+          axis.line.x = element_blank()) +
+    scale_x_continuous(expand=c(0,0)) +
+    scale_y_continuous(expand=c(0,0))
+  
+    ## geneList <- gsdata$geneList
+    ## j <- which.min(abs(geneList))
+    ## v1 <- quantile(geneList[1:j], seq(0,1, length.out=6))[1:5]
+    ## v2 <- quantile(geneList[j:length(geneList)], seq(0,1, length.out=6))[1:5]
+    
+    ## v <- sort(c(v1, v2))
+    ## inv <- findInterval(geneList, v)
+    
+    v <- seq(1, sum(gsdata$position), length.out=9)
+    inv <- findInterval(rev(cumsum(gsdata$position)), v)
+    if (min(inv) == 0) inv <- inv + 1
+    
+    col=c(rev(brewer.pal(5, "Blues")), brewer.pal(5, "Reds"))
+    
+    ymin <- min(p2$data$ymin)
+    yy <- max(p2$data$ymax - p2$data$ymin) * .3
+    xmin <- which(!duplicated(inv))
+    xmax <- xmin + as.numeric(table(inv)[unique(inv)])
+    d <- data.frame(ymin = ymin, ymax = yy,
+                    xmin = xmin,
+                    xmax = xmax,
+                    col = col[unique(inv)])
+    p2 <- p2 + geom_rect(
+      aes_(xmin=~xmin,
+           xmax=~xmax,
+           ymin=~ymin,
+           ymax=~ymax,
+           fill=~I(col)),
+      data=d,
+      alpha=.9,
+      inherit.aes=FALSE)
+  
+  ## p2 <- p2 +
+  ## geom_rect(aes(xmin=x-.5, xmax=x+.5, fill=geneList),
+  ##           ymin=ymin, ymax = ymin + yy, alpha=.5) +
+  ## theme(legend.position="none") +
+  ## scale_fill_gradientn(colors=color_palette(c("blue", "red")))
+  
+  df2 <- p$data #data.frame(x = which(p$data$position == 1))
+  df2$y <- p$data$geneList[df2$x]
+  p.pos <- p + geom_segment(data=df2, aes_(x=~x, xend=~x, y=~y, yend=0), color="grey")
+  p.pos <- p.pos + ylab("Ranked list metric") +
+    xlab("Rank in Ordered Dataset") +
+    theme(plot.margin=margin(t = -.1, r = .2, b=.2, l=.2, unit="cm"))
+  
+  if (!is.null(title) && !is.na(title) && title != "")
+    p.res <- p.res + ggtitle(title)
+  
+  if (length(color) == length(geneSetID)) {
+    p.res <- p.res + scale_color_manual(values=color)
+    if (length(color) == 1) {
+      p.res <- p.res + theme(legend.position = "none")
+      p2 <- p2 + scale_color_manual(values = "black")
+    } else {
+      p2 <- p2 + scale_color_manual(values = color)
+    }
+  }
+  
+  if (pvalue_table) {
+    pd <- x[SetName, c("Description", "pvalue", "p.adjust")]
+    pd <- pd[order(pd[,1], decreasing=FALSE),]
+    rownames(pd) <- "" # pd$Description
+    
+    pd <- pd[,-1]
+    pd <- round(pd, 4)
+    
+    tp <- tableGrob2(pd, p.res)
+    
+    p.res <- p.res + theme(legend.position = "none") +
+      annotation_custom(tp,
+                        xmin = quantile(p.res$data$x, .5),
+                        xmax = quantile(p.res$data$x, .95),
+                        ymin = quantile(p.res$data$runningScore, .75),
+                        ymax = quantile(p.res$data$runningScore, .9))
+  }
+  
+  
+  plotlist <- list(p.res, p2, p.pos)[subplots]
+  n <- length(plotlist)
+  plotlist[[n]] <- plotlist[[n]] +
+    theme(axis.line.x = element_line(),
+          axis.ticks.x=element_line(),
+          axis.text.x = element_text())
+  
+  if (length(subplots) == 1)
+    return(plotlist[[1]] + theme(plot.margin=margin(t=.2, r = .2, b=.2, l=.2, unit="cm")))
+  
+  
+  if (length(rel_heights) > length(subplots))
+    rel_heights <- rel_heights[subplots]
+  
+  plot_grid(plotlist = plotlist, ncol=1, align="v", rel_heights=rel_heights)
+}
+
+
+plotEnrichment3 <- function(pathway_S, pathway_N, stats, gseaParam = 1, ticksSize = 0.2, gsea, pvalue = T, highlight = NULL) {
+  rnk <- rank(-stats)
+  ord <- order(rnk)
+  statsAdj <- stats[ord]
+  statsAdj <- sign(statsAdj) * (abs(statsAdj)^gseaParam)
+  statsAdj <- statsAdj/max(abs(statsAdj))
+  pathway_S0 <- pathway_S
+  pathway_S <- unname(as.vector(na.omit(match(pathway_S, names(statsAdj)))))
+  pathway_S <- sort(pathway_S)
+  gseaRes_S <- calcGseaStat(statsAdj, selectedStats = pathway_S, returnAllExtremes = TRUE)
+  
+  if(gseaRes_S$res < 0) {
+    gseaRes_S$res <- -1 * gseaRes_S$res
+    gseaRes_S$tops <- -1 * gseaRes_S$tops
+    gseaRes_S$bottoms <- -1 * gseaRes_S$bottoms
+  }
+  
+  bottoms_S <- gseaRes_S$bottoms
+  tops_S <- gseaRes_S$tops
+  n <- length(statsAdj)
+  xs_S <- as.vector(rbind(pathway_S - 1, pathway_S))
+  ys_S <- as.vector(rbind(bottoms_S, tops_S))
+  toPlot_S <- data.frame(x = c(0, xs_S, n + 1), y = c(0, ys_S, 0))
+  diff_S <- (max(tops_S) - min(bottoms_S))/8
+  
+  
+  pathway_N0 <- pathway_N
+  
+  pathway_N <- unname(as.vector(na.omit(match(pathway_N, names(statsAdj)))))
+  pathway_N <- sort(pathway_N)
+  gseaRes_N <- calcGseaStat(statsAdj, selectedStats = pathway_N, returnAllExtremes = TRUE)
+  
+  if(gseaRes_N$res < 0) {
+    gseaRes_N$res <- -1 * gseaRes_N$res
+    gseaRes_N$tops <- -1 * gseaRes_N$tops
+    gseaRes_N$bottoms <- -1 * gseaRes_N$bottoms
+  }
+  
+  bottoms_N <- gseaRes_N$bottoms
+  tops_N <- gseaRes_N$tops
+  xs_N <- as.vector(rbind(pathway_N - 1, pathway_N))
+  ys_N <- as.vector(rbind(bottoms_N, tops_N))
+  toPlot_N <- data.frame(x = c(0, xs_N, n + 1), y = c(0, ys_N, 0))
+  diff_N <- (max(tops_N) - min(bottoms_N))/8
+  
+  
+  toPlot_S$Type = "Severe"
+  toPlot_N$Type = "Nonsevere"
+  
+  # toPlot_N$y <- abs(toPlot_N$y)
+  toPlot <- rbind(toPlot_S, toPlot_N)
+  toPlot$Type <- factor(toPlot$Type, levels = c("Severe", "Nonsevere"))
+  
+  x = y = NULL
+  ggplot(toPlot, aes(x = x, y = y)) + 
+    geom_point(color = "green", size = 0.1) + 
+    geom_hline(yintercept = 0, colour = "black") + 
+    geom_line(aes(color = Type)) + 
+    scale_color_manual(values = c("red", "blue")) + 
+    theme_classic() + 
+    geom_segment(data = data.frame(x = pathway_S), 
+                 mapping = aes(x = x, y = -diff_S/2, xend = x, yend = diff_S/2), color = "red", size = ticksSize) + 
+    geom_segment(data = data.frame(x = pathway_N), 
+                 mapping = aes(x = x, y = -diff_N/2, xend = x, yend = diff_N/2), color = "blue", size = ticksSize) + 
+    theme(panel.border = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          legend.position = "top", 
+          axis.line.y = element_line(),
+          axis.ticks.y = element_line(),
+          axis.text.y = element_text(), 
+          axis.line.x = element_blank(), 
+          axis.ticks.x = element_blank(), 
+          axis.text.x = element_blank(), 
+          axis.title.x = element_blank(), 
+          legend.title = element_blank()) + 
+    labs(x = "rank", y = "enrichment score") -> p1
+  
+  if(pvalue) {
+    pd <- gsea[pathway == "Severe", .(NES, padj)]
+    pd[, NES := round(NES, 2)]
+    pd[, padj := round(padj, 4)]
+    pd_S <- setDF(pd)
+    
+    pd <- gsea[pathway == "Nonsevere", .(NES, padj)]
+    pd[, NES := round(NES, 2)]
+    pd[, padj := round(padj, 4)]
+    pd_N <- setDF(pd)
+    
+    p1 <- p1 + 
+      annotate("text", label = paste(names(pd_S), pd_S, collapse = "\n", sep = ": "), 
+               x = max(p1$data$x) * .15, 
+               y = quantile(p1$data$y, .9), color = "red")  + 
+      annotate("text", label = paste(names(pd_N), pd_N, collapse = "\n", sep = ": "), 
+               x = max(p1$data$x) * .85, 
+               y = quantile(p1$data$y, .9), color = "blue")
+  }
+  
+  
+  col=c(rev(brewer.pal(5, "Blues")), brewer.pal(5, "Reds"))
+  
+  gsdata <- MygsInfo(geneSet = pathway_S0, geneList = stats, Description = "Severe")
+  
+  v <- seq(1, sum(gsdata$position), length.out = 9)
+  inv <- findInterval(rev(cumsum(gsdata$position)), v)
+  
+  ymin <- min(gsdata$ymin)
+  yy <- max(gsdata$ymax - gsdata$ymin) * .3
+  xmin <- which(!duplicated(inv))
+  xmax <- xmin + runLength(Rle(inv))
+  d_S <- data.frame(ymin = ymin, ymax = yy,
+                    xmin = xmin,
+                    xmax = xmax,
+                    col = col[rank(unique(inv))])
+  
+  ggplot(data = d_S, aes_(xmin = ~ xmin, xmax = ~ xmax, ymin = ~ ymin, ymax = ~ ymax, fill = ~ I(col))) +
+    geom_rect(alpha=.9) + 
+    theme_classic() + 
+    theme(axis.title = element_blank(), 
+          axis.text = element_blank(), 
+          axis.ticks = element_blank(), 
+          axis.line = element_blank()) -> p2
+  
+  
+  gsdata <- MygsInfo(geneSet = pathway_N0, geneList = stats, Description = "Nonsevere")
+  
+  v <- seq(1, sum(gsdata$position), length.out = 9)
+  inv <- findInterval(rev(cumsum(gsdata$position)), v)
+  
+  ymin <- min(gsdata$ymin)
+  yy <- max(gsdata$ymax - gsdata$ymin) * .3
+  xmin <- which(!duplicated(inv))
+  xmax <- xmin + runLength(Rle(inv))
+  d_N <- data.frame(ymin = ymin, ymax = yy,
+                    xmin = xmin,
+                    xmax = xmax,
+                    col = col[rank(unique(inv))])
+  
+  ggplot(data = d_N, aes_(xmin = ~ xmin, xmax = ~ xmax, ymin = ~ ymin, ymax = ~ ymax, fill = ~ I(col))) +
+    geom_rect(alpha=.9) + 
+    theme_classic() + 
+    theme(axis.title = element_blank(), 
+          axis.text = element_blank(), 
+          axis.ticks = element_blank(), 
+          axis.line = element_blank()) -> p3
+  
+  
+  
+  df2 <- gsdata #data.frame(x = which(p$data$position == 1))
+  df2$y <- gsdata$geneList[df2$x]
+  df2$Gene <- names(stats[df2$x])
+  setDT(df2)
+  
+  if(!is.null(highlight) & length(highlight) > 0) {
+    ggplot(data = df2) + 
+      geom_segment(aes_(x=~x, xend=~x, y=~y, yend=0), color="grey") + 
+      ylab("Ranked list metric") +
+      xlab("Rank in Ordered Dataset") + 
+      theme_classic() + 
+      geom_label_repel(data = df2[Gene %in% highlight, ], aes(x = x, y = 0, label = Gene), box.padding = 0.5, min.segment.length = 0) -> p4
+  } else {
+    ggplot(data = df2) + geom_segment(aes_(x=~x, xend=~x, y=~y, yend=0), color="grey") + 
+      ylab("Ranked list metric") +
+      xlab("Rank in Ordered Dataset") + 
+      theme_classic() -> p4
+  }
+  
+  
+  plot_grid(p1, p2, p3, p4, ncol = 1, align = "v", rel_heights = c(5, .5, .5, 2))
+  
+}
+
+
+plotEnrichment4 <- function(pathway_S, pathway_N, stats, gseaParam = 1, ticksSize = 0.2, gsea, pvalue = T) {
+  rnk <- rank(-stats)
+  ord <- order(rnk)
+  statsAdj <- stats[ord]
+  statsAdj <- sign(statsAdj) * (abs(statsAdj)^gseaParam)
+  statsAdj <- statsAdj/max(abs(statsAdj))
+  pathway_S0 <- pathway_S
+  pathway_S <- unname(as.vector(na.omit(match(pathway_S, names(statsAdj)))))
+  pathway_S <- sort(pathway_S)
+  gseaRes_S <- calcGseaStat(statsAdj, selectedStats = pathway_S, returnAllExtremes = TRUE)
+  
+  if(gseaRes_S$res < 0) {
+    gseaRes_S$res <- -1 * gseaRes_S$res
+    gseaRes_S$tops <- -1 * gseaRes_S$tops
+    gseaRes_S$bottoms <- -1 * gseaRes_S$bottoms
+  }
+  
+  bottoms_S <- gseaRes_S$bottoms
+  tops_S <- gseaRes_S$tops
+  n <- length(statsAdj)
+  xs_S <- as.vector(rbind(pathway_S - 1, pathway_S))
+  ys_S <- as.vector(rbind(bottoms_S, tops_S))
+  toPlot_S <- data.frame(x = c(0, xs_S, n + 1), y = c(0, ys_S, 0))
+  diff_S <- (max(tops_S) - min(bottoms_S))/8
+  
+  
+  pathway_N0 <- pathway_N
+  
+  pathway_N <- unname(as.vector(na.omit(match(pathway_N, names(statsAdj)))))
+  pathway_N <- sort(pathway_N)
+  gseaRes_N <- calcGseaStat(statsAdj, selectedStats = pathway_N, returnAllExtremes = TRUE)
+  
+  if(gseaRes_N$res < 0) {
+    gseaRes_N$res <- -1 * gseaRes_N$res
+    gseaRes_N$tops <- -1 * gseaRes_N$tops
+    gseaRes_N$bottoms <- -1 * gseaRes_N$bottoms
+  }
+  
+  bottoms_N <- gseaRes_N$bottoms
+  tops_N <- gseaRes_N$tops
+  xs_N <- as.vector(rbind(pathway_N - 1, pathway_N))
+  ys_N <- as.vector(rbind(bottoms_N, tops_N))
+  toPlot_N <- data.frame(x = c(0, xs_N, n + 1), y = c(0, ys_N, 0))
+  diff_N <- (max(tops_N) - min(bottoms_N))/8
+  
+  
+  toPlot_S$Type = "Severe"
+  toPlot_N$Type = "Nonsevere"
+  
+  # toPlot_N$y <- abs(toPlot_N$y)
+  toPlot <- rbind(toPlot_S, toPlot_N)
+  toPlot$Type <- factor(toPlot$Type, levels = c("Severe", "Nonsevere"))
+  
+  x = y = NULL
+  ggplot(toPlot, aes(x = x, y = y)) + 
+    geom_point(color = "green", size = 0.1) + 
+    geom_hline(yintercept = 0, colour = "black") + 
+    geom_line(aes(color = Type)) + 
+    scale_color_manual(values = c("red", "blue")) + 
+    theme_classic() + 
+    geom_segment(data = data.frame(x = pathway_S), 
+                 mapping = aes(x = x, y = -diff_S/2, xend = x, yend = diff_S/2), color = "red", size = ticksSize) + 
+    geom_segment(data = data.frame(x = pathway_N), 
+                 mapping = aes(x = x, y = -diff_N/2, xend = x, yend = diff_N/2), color = "blue", size = ticksSize) + 
+    theme(panel.border = element_blank(), 
+          panel.grid.minor = element_blank(), 
+          legend.position = "top", 
+          axis.line.y = element_line(),
+          axis.ticks.y = element_line(),
+          axis.text.y = element_text(), 
+          axis.line.x = element_blank(), 
+          axis.ticks.x = element_blank(), 
+          axis.text.x = element_blank(), 
+          axis.title.x = element_blank(), 
+          legend.title = element_blank()) + 
+    labs(x = "rank", y = "enrichment score") -> p1
+  
+  if(pvalue) {
+    pd <- gsea[pathway == "Severe", .(NES, padj)]
+    pd[, NES := round(NES, 2)]
+    pd[, padj := round(padj, 3)]
+    pd_S <- setDF(pd)
+    
+    pd <- gsea[pathway == "Nonsevere", .(NES, padj)]
+    pd[, NES := round(NES, 2)]
+    pd[, padj := round(padj, 3)]
+    pd_N <- setDF(pd)
+    
+    p1 <- p1 + 
+      annotate("text", label = paste(names(pd_S), pd_S, collapse = "; ", sep = ": "), 
+               x = max(p1$data$x)*0.25, 
+               y = quantile(p1$data$y, .8), color = "red")  + 
+      annotate("text", label = paste(names(pd_N), pd_N, collapse = "; ", sep = ": "), 
+               x = max(p1$data$x)*0.75, 
+               y = quantile(p1$data$y, .8), color = "blue")
+  }
+  
+  return(p1)
+}
+
+```
+
+#### 3.1 Cor Coef{#E}
+
+```{r fig.height=10, fig.width=10}
+library(fgsea)
+lapply(unique(Cor_res$Genotype), FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  # Tab[, Z := Mean_Y - Mean_N]
+  Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  # m_t2g <- data.frame(gs_name = rep(names(my_gsets), mapply(length, my_gsets)), feature = unlist(my_gsets), row.names = NULL)
+  # gsea <- GSEA(geneList = sort(gene_list, decreasing = T), TERM2GENE = m_t2g)
+  
+  print(g)
+  gp <- plotEnrichment3(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes, pvalue = T)
+  print(gp)
+  fgseaRes[, Genotype := g]
+  return(fgseaRes)
+}) -> res_gsea
+```
+
+
+```{r fig.width=5, fig.height=35}
+lapply(unique(Cor_res$Genotype), FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  Tab <- merge(Tab, classify, by.x = "PhenoType", by.y = "Trait")
+  # Tab[, Z := Mean_Y - Mean_N]
+  Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  plotEnrichment4(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes) + 
+    theme(legend.position = "none") + labs(y = g)
+}) -> gsea_plot
+
+plot_grid(plotlist = gsea_plot, ncol = 1, align = "v")
+```
+
+
+```{r}
+saveRDS(object = res_gsea, file = "./GSEA_CorCoef_V2.Rds")
+res_gsea <- do.call(rbind, res_gsea)
+res_gsea[padj < 0.05, ]
+openxlsx::write.xlsx(res_gsea, "./GSEA_CorCoef_V2.xlsx")
+```
+
+```{r}
+res_gsea_sig <- res_gsea[padj < 0.05, ]
+
+Genotype_Severe <- unique(c(res_gsea_sig[pathway == "Severe" & ES > 0, Genotype], res_gsea_sig[pathway == "Nonsevere" & ES < 0, Genotype]))
+Genotype_Nonsevere <- unique(c(res_gsea_sig[pathway == "Severe" & ES < 0, Genotype], res_gsea_sig[pathway == "Nonsevere" & ES > 0, Genotype]))
+```
+
+
+```{r fig.width=5, fig.height=6}
+lapply(Genotype_Severe, FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  Tab <- merge(Tab, classify, by.x = "PhenoType", by.y = "Trait")
+  Tab[, Z := Mean_Y - Mean_N]
+  # Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  plotEnrichment4(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes, pvalue = F) + 
+    theme(legend.position = "none") + labs(title = g)
+}) -> gsea_plot
+
+plot_grid(plotlist = gsea_plot, ncol = 1, align = "v")
+```
+
+
+```{r fig.width=5, fig.height=18}
+lapply(Genotype_Nonsevere, FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  Tab <- merge(Tab, classify, by.x = "PhenoType", by.y = "Trait")
+  Tab[, Z := Mean_Y - Mean_N]
+  # Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  plotEnrichment4(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes, pvalue = F) + 
+    theme(legend.position = "none") + labs(title = g)
+}) -> gsea_plot
+plot_grid(plotlist = gsea_plot, ncol = 1, align = "v")
+```
+
+
+#### 3.2 Mean_Y - Mean_N{#F}
+
+```{r fig.height=10, fig.width=10}
+library(fgsea)
+lapply(unique(Cor_res$Genotype), FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  Tab <- merge(Tab, classify, by.x = "PhenoType", by.y = "Trait")
+  Tab[, Z := Mean_Y - Mean_N]
+  # Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  # m_t2g <- data.frame(gs_name = rep(names(my_gsets), mapply(length, my_gsets)), feature = unlist(my_gsets), row.names = NULL)
+  # gsea <- GSEA(geneList = sort(gene_list, decreasing = T), TERM2GENE = m_t2g)
+  
+  print(g)
+  gp <- plotEnrichment3(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes, pvalue = T)
+  print(gp)
+  fgseaRes[, Genotype := g]
+  return(fgseaRes)
+}) -> res_gsea
+```
+
+```{r fig.width=5, fig.height=35}
+lapply(unique(Cor_res$Genotype), FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  Tab <- merge(Tab, classify, by.x = "PhenoType", by.y = "Trait")
+  Tab[, Z := Mean_Y - Mean_N]
+  # Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  plotEnrichment4(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes) + 
+    theme(legend.position = "none") + labs(y = g)
+}) -> gsea_plot
+
+plot_grid(plotlist = gsea_plot, ncol = 1, align = "v")
+```
+
+```{r}
+saveRDS(object = res_gsea, file = "./GSEA_Z_V2.Rds")
+res_gsea <- do.call(rbind, res_gsea)
+res_gsea[padj < 0.05, ]
+openxlsx::write.xlsx(res_gsea, "./GSEA_Z_V2.xlsx")
+```
+
+
+```{r}
+res_gsea_sig <- res_gsea[padj < 0.05, ]
+
+Genotype_Severe <- unique(c(res_gsea_sig[pathway == "Severe" & ES > 0, Genotype], res_gsea_sig[pathway == "Nonsevere" & ES < 0, Genotype]))
+Genotype_Nonsevere <- unique(c(res_gsea_sig[pathway == "Severe" & ES < 0, Genotype], res_gsea_sig[pathway == "Nonsevere" & ES > 0, Genotype]))
+```
+
+
+```{r fig.width=5, fig.height=8}
+lapply(Genotype_Severe, FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  Tab <- merge(Tab, classify, by.x = "PhenoType", by.y = "Trait")
+  Tab[, Z := Mean_Y - Mean_N]
+  # Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  plotEnrichment4(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes, pvalue = F) + 
+    theme(legend.position = "none") + labs(title = g)
+}) -> gsea_plot
+
+plot_grid(plotlist = gsea_plot, ncol = 1, align = "v")
+```
+
+
+```{r fig.width=5, fig.height=16}
+lapply(Genotype_Nonsevere, FUN = function(g) {
+  Tab <- Cor_res[Genotype == g, ]
+  Tab <- merge(Tab, classify, by.x = "PhenoType", by.y = "Trait")
+  Tab[, Z := Mean_Y - Mean_N]
+  # Tab[, Z := CorCoef_all]
+  setkey(Tab, Z)
+  
+  gene_list <- Tab[!is.na(Z), Z]
+  names(gene_list) <- Tab[!is.na(Z), PhenoType]
+  gene_list <- sort(gene_list, decreasing = T)
+  
+  fgseaRes <- fgsea(my_gsets, gene_list, nperm = 10000)
+  
+  plotEnrichment4(pathway_S = my_gsets$Severe, pathway_N = my_gsets$Nonsevere, stats = gene_list, gsea = fgseaRes, pvalue = F) + 
+    theme(legend.position = "none") + labs(title = g)
+}) -> gsea_plot
+plot_grid(plotlist = gsea_plot, ncol = 1, align = "v")
+```

@@ -1,0 +1,397 @@
+---
+title: "Correlation heatmap"
+author: "TangChao"
+date: "2020/5/15"
+output: 
+  html_document:
+    code_folding: "hide"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center')
+```
+
+### Content
+[0. Preparation data](#A)    
+[1. Clinical traits difference between severe and nonsevere](#B)    
+[2. Severe-probability in different grnotypes](#C)    
+
+### 0. Preparation data{#A}
+```{r}
+library(data.table)
+library(readxl)
+library(openxlsx)
+
+geno <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Genotype_Table.xlsx"))
+
+patient <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Patient_information.xlsx"))
+
+Cutoff <- 0.2
+```
+
+
+### 1. Clinical traits difference between severe and nonsevere
+##### T-test in all data
+```{r}
+pheno <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno.xlsx"))
+Sichuan <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200429_Edited/Sichuan_20200228_V1.xlsx"))[, .(患者姓名, 性别, 该患者病例诊断分型)]
+Sichuan[, 性别 := ifelse(性别 == "男", "Male", "Female")]
+Sichuan[, 该患者病例诊断分型 := ifelse(该患者病例诊断分型 %in% c("普通型", "轻型"), "轻型", "重型")]
+
+pt <- 3:ncol(pheno)
+
+lapply(pt, function(j) {
+  Tab <- na.omit(merge(pheno[, c(1, 2, j), with = F], Sichuan[, .(患者姓名, 性别, 该患者病例诊断分型)], by.x = c("Name", "Gender"), by.y = c("患者姓名", "性别")))
+  colnames(Tab)[3:4] <- c("y", "Grading")
+  Tab[, Grading := ifelse(Grading == "轻型", "Nonsevere", "Severe")]
+  Tab[, Grading := factor(Grading, levels = c("Nonsevere", "Severe"))]
+  
+  Gendert <- tryCatch(t.test(y ~ Grading, Tab)$p.value, error = function(e) NA)
+  N_Severe <- Tab[Grading == "Severe", .N]
+  N_Nonsevere <- Tab[Grading == "Nonsevere", .N]
+  Mean_Severe <- Tab[Grading == "Severe", mean(y)]
+  Mean_Nonsevere <- Tab[Grading == "Nonsevere", mean(y)]
+  Z <- Mean_Severe - Mean_Nonsevere
+  data.table(N_Severe = N_Severe, Mean_Severe = Mean_Severe, N_Nonsevere = N_Nonsevere, Mean_Nonsevere = Mean_Nonsevere, Z = Z, T.test.P = Gendert, Phenotype = colnames(pheno)[j])
+}) -> Grading_Pheno_Test0
+Grading_Pheno_Test0 <- do.call(rbind, Grading_Pheno_Test0)
+setkey(Grading_Pheno_Test0, Phenotype)
+```
+
+```{r fig.height=5, fig.width=5}
+Grading_Pheno_Test0 <- Grading_Pheno_Test0[Phenotype != "Age", ]
+
+my_gsets <- list(Severe = c("CRP", "D-dimer", "FIB", "GLU", "Granulocyte", "hs-CRP", "Monocyte", "Respiratory frequency", "Systolic pressure", "ESR", "LDH"), 
+                 Nonsevere = c("Alb/Glb", "CD3+", "CD3+CD4+", "CD3+CD8+", "CD8+", "Ca", "IFN-b", "LYMPH%"))
+
+library(ggplot2)
+
+library(ggrepel)
+
+ggplot(Grading_Pheno_Test0, aes(Z, -log10(T.test.P), colour = Z)) + 
+  geom_point() + 
+  theme_classic(base_size = 16) + 
+  theme(axis.title = element_text(size = 22), 
+        axis.text = element_text(size = 16)) + 
+  labs(y = "-log10(T-test P)", x = "Z(Severe - Nonsevere)") + 
+  guides(colour = F) + 
+  scale_color_gradient2(low = "blue", high = "red", mid = "grey") + 
+  geom_text_repel(data = Grading_Pheno_Test0[Phenotype %in% my_gsets$Severe, ], aes(Z, -log10(T.test.P), label = Phenotype), size = 5) + 
+  geom_text_repel(data = Grading_Pheno_Test0[Phenotype %in% my_gsets$Nonsevere, ], aes(Z, -log10(T.test.P), label = Phenotype), size = 5) -> p11
+```
+
+
+
+##### T-test in our data
+
+```{r}
+pheno <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno.xlsx"))
+
+pt <- 3:ncol(pheno)
+
+lapply(pt, function(j) {
+  Tab <- na.omit(merge(pheno[, c(1, 2, j), with = F], patient[, .(Name, Gender, Type)], by = c("Name", "Gender")))
+  colnames(Tab)[3:4] <- c("y", "Grading")
+  
+  Gendert <- tryCatch(t.test(y ~ Grading, Tab)$p.value, error = function(e) NA)
+  N_Severe <- Tab[Grading == "Severe", .N]
+  N_Nonsevere <- Tab[Grading == "Nonsevere", .N]
+  Mean_Severe <- Tab[Grading == "Severe", mean(y)]
+  Mean_Nonsevere <- Tab[Grading == "Nonsevere", mean(y)]
+  Z <- Mean_Severe - Mean_Nonsevere
+  data.table(N_Severe = N_Severe, Mean_Severe = Mean_Severe, N_Nonsevere = N_Nonsevere, Mean_Nonsevere = Mean_Nonsevere, Z = Z, T.test.P = Gendert, Phenotype = colnames(pheno)[j])
+}) -> Grading_Pheno_Test
+Grading_Pheno_Test <- do.call(rbind, Grading_Pheno_Test)
+setkey(Grading_Pheno_Test, Phenotype)
+```
+
+
+```{r fig.height=5, fig.width=5}
+Grading_Pheno_Test <- Grading_Pheno_Test[Phenotype != "Age", ]
+
+my_gsets <- list(Severe = c("CRP", "D-dimer", "FIB", "GLU", "NEUT", "hs-CRP", "Monocyte", "Respiratory frequency", "Systolic pressure", "ESR", "LDH"), 
+                 Nonsevere = c("Alb/Glb", "CD3+", "CD3+CD4+", "CD3+CD8+", "CD8+", "Ca", "IFN-b", "LYMPH%"))
+
+library(ggplot2)
+
+library(ggrepel)
+
+ggplot(Grading_Pheno_Test, aes(Z, -log10(T.test.P), colour = Z)) + 
+  geom_point() + 
+  theme_classic(base_size = 16) + 
+  theme(axis.title = element_text(size = 22), 
+        axis.text = element_text(size = 16)) + 
+  labs(y = "-log10(T-test P)", x = "Z(Severe - Nonsevere)") + 
+  guides(colour = F) + 
+  scale_color_gradient2(low = "blue", high = "red", mid = "grey") + 
+  geom_text_repel(data = Grading_Pheno_Test[Phenotype %in% my_gsets$Severe, ], aes(Z, -log10(T.test.P), label = Phenotype), size = 5) + 
+  geom_text_repel(data = Grading_Pheno_Test[Phenotype %in% my_gsets$Nonsevere, ], aes(Z, -log10(T.test.P), label = Phenotype), size = 5) -> p12
+```
+
+```{r fig.height=5, fig.width=10}
+cowplot::plot_grid(p11, p12, nrow = 1)
+```
+
+
+
+
+### 2. Severe-probability in different grnotypes{#C}
+
+```{r}
+gt <- 2:ncol(geno)
+lapply(gt, function(i) {
+  Tab <- na.omit(merge(geno[, c(1, i), with = FALSE], patient[, .(PatientID, Type)]))
+  colnames(Tab)[2:3] <- c("x", "Grading")
+  Tab[, Type := ifelse(x > Cutoff, "Y", "N")]
+  Tab$Genotype <- colnames(geno)[i]
+  return(Tab)
+}) -> Ps
+
+Mat <- do.call(rbind, Ps)
+
+Tab <- Mat[Type == "Y", ]
+Tab_ord <- Tab[, nrow(.SD[Grading == "Severe", ])/nrow(.SD), by = Genotype]
+
+setkey(Tab_ord, V1)
+Tab_ord[, Genotype := factor(Genotype, levels = Genotype)]
+
+colnames(Tab_ord)[2] <- "Percent"
+setkey(Tab_ord, "Genotype")
+```
+
+### 3. Correlation Coefficient heatmap
+
+```{r}
+library(ComplexHeatmap)
+library(circlize)
+library(reshape2)
+library(openxlsx)
+
+scale_dot_size = 1.2
+Z_col_fun = colorRamp2(c(-3, 0, 3), c("blue", "white", "red")) 
+```
+
+```{r}
+Muta_Annota <- fread("/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/analysis/Mutation/High_Freq_Mutation/20200511/High_Freq_SNP_and_INDEL_annotated.txt")
+Muta_NonAnnota <- fread("/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/analysis/Mutation/High_Freq_Mutation/20200511/High_Freq_SNP_and_INDEL.txt")
+
+SNP_info <- merge(Muta_NonAnnota, Muta_Annota, by.y = c("Start Position", "End position"), by.x = c("start", "end"))
+SNP_info <- SNP_info[, .(FinalID, `Ref annotation posotion`, `Annotation Type`, Impact)]
+colnames(SNP_info) <- c("FinalID", "Gene", "VEP", "Impact")
+SNP_info[, Gene := sub("START:", "", sub("START:gene-", "", Gene))]
+
+SNP_info[, Impact := stringr::str_remove(Impact, pattern = ";DISTANCE=[[:digit:]]+")]
+
+SNP_info <- setDF(SNP_info[, -1], rownames = SNP_info[[1]])
+```
+
+
+```{r}
+Cor_res <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/analysis/Clinical_Featuers/20200515_v1/Cor_res.xlsx"))
+Cor_res[, PhenoType := gsub("\\.", " ", PhenoType)]
+# Cor_res <- Cor_res[NY > 1, ]
+
+my_gsets <- list(Severe = c("CRP", "D-dimer", "FIB", "GLU", "NEUT", "hs-CRP", "Monocyte", "Respiratory frequency", "Systolic pressure", "ESR", "LDH"), 
+                 Nonsevere = c("Alb/Glb", "CD3+", "CD3+CD4+", "CD3+CD8+", "CD8+", "Ca", "IFN-b", "LYMPH%"))
+
+Pheno_tu <- unlist(my_gsets, use.names = F)
+
+Pheno_tu %in% Cor_res$PhenoType
+
+Pheno_tu[!Pheno_tu %in% Cor_res$PhenoType]
+Pheno_tu
+Cor_res_tu <- Cor_res[PhenoType %in% Pheno_tu, ]
+
+Mat <- dcast(Cor_res_tu, PhenoType ~ Genotype, value.var = "CorCoef_all")
+# Mat <- dcast(Cor_res_tu[CorPva_all < 0.05, ], PhenoType ~ Genotype, value.var = "CorCoef_all")
+# Mat$PhenoType <- gsub("\\(cell / UL\\)", "", Mat$PhenoType)
+Mat <- setDF(Mat[, -1], rownames = Mat[[1]])
+Mat[is.na(Mat)] <- 0
+```
+
+
+```{r fig.width=14, fig.height=10}
+ha = HeatmapAnnotation(
+  Gene = SNP_info[colnames(Mat), ]$Gene,
+  VEP = SNP_info[colnames(Mat), ]$VEP,
+  col = list(Gene = c("5'UTR" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[1], 
+                      "orf1ab" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[2], 
+                      "S" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[3], 
+                      "ORF3a" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[4], 
+                      "E" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[5], 
+                      "M" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[6], 
+                      "ORF6" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[7], 
+                      "ORF7a" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[8], 
+                      "ORF8" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[9], 
+                      "N" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[10], 
+                      "ORF10" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[11], 
+                      "3'UTR" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[12], 
+                      "Intergenic" = "grey"), 
+             VEP = c("upstream_gene_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[1], 
+                     "inframe_deletion" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2], 
+                     "missense_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[3], 
+                     "synonymous_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[4], 
+                     "frameshift_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[5], 
+                     "stop_gained,inframe_deletion" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[6], 
+                     "stop_lost" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[7], 
+                     "downstream_gene_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[8]), 
+             Impact = c("MODIFIER" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[1],
+                        "MODERATE" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[2],
+                        "LOW" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[3],
+                        "HIGH" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[4])
+  )
+)
+
+pvalue_col_fun = colorRamp2(c(-1, 0, 1), c(RColorBrewer::brewer.pal(n = 11, name = "PiYG")[11], 
+                                           RColorBrewer::brewer.pal(n = 11, name = "PiYG")[6], 
+                                           RColorBrewer::brewer.pal(n = 11, name = "PiYG")[1])) 
+
+
+# row_ha = HeatmapAnnotation(Z = Grading_Pheno_Test[rownames(Mat), Z], which = "row")
+row_ha = HeatmapAnnotation(Z = anno_simple(Grading_Pheno_Test[rownames(Mat), Z], col = pvalue_col_fun), which = "row")
+
+lgd_pvalue = Legend(title = "Z", col = pvalue_col_fun, at = -2:2, labels = c("-2", "-1", "0", "1", "2"))
+
+
+
+h2 <- Heatmap(
+  Mat, name = "cor",
+  rect_gp = gpar(type = "none"),
+  top_annotation = ha,
+  bottom_annotation = HeatmapAnnotation(Severe = anno_empty(border = TRUE, height = unit(1.5, "cm"))), 
+  right_annotation = row_ha, 
+  column_names_rot = 45,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    s = min(unit.c(convertWidth(width, "cm"), convertHeight(height, "cm")))
+    grid.circle(
+      x = x,
+      y = y,
+      r = s * (abs(Mat[i, j]) + 0) * scale_dot_size,
+      gp = gpar(col = "white", fill = fill)
+    )
+  }
+)
+
+co = column_order(h2)
+
+scale_dot_size = 1.2
+
+draw(h2, heatmap_legend_side = "right", annotation_legend_list = list(lgd_pvalue))
+decorate_annotation("Severe", {
+  # value on x-axis is always 1:ncol(mat)
+  x = 1:length(Tab_ord[colnames(Mat)[co], ]$Percent)
+  # while values on y-axis is the value after column reordering
+  value = Tab_ord[colnames(Mat)[co], ]$Percent
+  pushViewport(viewport(xscale = c(0.5, 35.5), yscale = c(-0.05, .70)))
+  grid.lines(c(0.5, 35.5), c(10/88, 10/88), gp = gpar(lty = 2),
+             default.units = "native")
+  grid.points(x, value, pch = 16, size = unit(2, "mm"),
+              gp = gpar(col = ifelse(value > 10/88, "black", "black")), default.units = "native")
+  grid.yaxis(at = c(0, round(10/88,2), 0.70))
+  popViewport()
+})
+```
+
+
+```{r fig.width=14, fig.height=8}
+ha = HeatmapAnnotation(
+  Gene = SNP_info[colnames(Mat), ]$Gene,
+  VEP = SNP_info[colnames(Mat), ]$VEP,
+  col = list(Gene = c("5'UTR" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[1], 
+                      "orf1ab" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[2], 
+                      "S" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[3], 
+                      "ORF3a" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[4], 
+                      "E" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[5], 
+                      "M" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[6], 
+                      "ORF6" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[7], 
+                      "ORF7a" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[8], 
+                      "ORF8" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[9], 
+                      "N" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[10], 
+                      "ORF10" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[11], 
+                      "3'UTR" = RColorBrewer::brewer.pal(n = 12, name = "Set3")[12], 
+                      "Intergenic" = "grey"), 
+             VEP = c("upstream_gene_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[1], 
+                     "inframe_deletion" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2], 
+                     "missense_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[3], 
+                     "synonymous_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[4], 
+                     "frameshift_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[5], 
+                     "stop_gained,inframe_deletion" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[6], 
+                     "stop_lost" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[7], 
+                     "downstream_gene_variant" = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[8]), 
+             Impact = c("MODIFIER" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[1],
+                        "MODERATE" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[2],
+                        "LOW" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[3],
+                        "HIGH" = RColorBrewer::brewer.pal(n = 8, name = "Accent")[4])
+  ), 
+  annotation_name_side = "left"
+)
+
+pvalue_col_fun = colorRamp2(c(-1, 0, 1), c(RColorBrewer::brewer.pal(n = 11, name = "PiYG")[11], 
+                                           RColorBrewer::brewer.pal(n = 11, name = "PiYG")[6], 
+                                           RColorBrewer::brewer.pal(n = 11, name = "PiYG")[1])) 
+
+
+# row_ha = HeatmapAnnotation(Z = Grading_Pheno_Test[rownames(Mat), Z], which = "row")
+row_ha = HeatmapAnnotation(Z = anno_simple(Grading_Pheno_Test[rownames(Mat), Z], col = pvalue_col_fun), which = "row", annotation_name_side = "top")
+
+lgd_pvalue = Legend(title = "Z", col = pvalue_col_fun, at = -2:2, labels = c("-2", "-1", "0", "1", "2"))
+
+
+
+h2 <- Heatmap(
+  Mat, name = "cor",
+  rect_gp = gpar(type = "none"),
+  bottom_annotation = ha,
+  right_annotation = row_ha, 
+  column_names_rot = -45,
+  cell_fun = function(j, i, x, y, width, height, fill) {
+    s = min(unit.c(convertWidth(width, "cm"), convertHeight(height, "cm")))
+    grid.circle(
+      x = x,
+      y = y,
+      r = s * (abs(Mat[i, j]) + 0) * scale_dot_size,
+      gp = gpar(col = "white", fill = fill)
+    )
+  }
+)
+
+co = column_order(h2)
+
+scale_dot_size = 1.2
+draw(h2, heatmap_legend_side = "right", annotation_legend_list = list(lgd_pvalue))
+
+pdf("./Fig4/Heatmap.pdf", width = 14, height = 8)
+draw(h2, heatmap_legend_side = "right", annotation_legend_list = list(lgd_pvalue))
+dev.off()
+```
+
+### 4. Hypergeometric of significant pairs
+```{r}
+
+do.call(rbind, lapply(1:10, function(i) {
+  do.call(rbind, lapply(c(0.1, 0.05, 0.01), function(j) {
+    Sig1 <- unique(Cor_res[NY > i & CorPva_all < j, PhenoType])
+    data.table(j, 
+               length(Sig1), 
+               length(unique(Cor_res[NY > i & CorPva_all < j, Genotype])), 
+               nrow(Cor_res[NY > i & CorPva_all < j, ]), 
+               
+               sum(Sig1 %in% Grading_Sig), 
+               sum(Sig1 %in% my_gsets$Severe), 
+               sum(Sig1 %in% my_gsets$Nonsevere), 
+               
+               phyper(q = sum(Sig1 %in% my_gsets$Severe), m = 11, n = 117, k = length(Sig1), lower.tail = F), 
+               phyper(q = sum(Sig1 %in% my_gsets$Nonsevere), m = 8, n = 117, k = length(Sig1), lower.tail = F), 
+               phyper(q = sum(Sig1 %in% Grading_Sig), m = 19, n = 117, k = length(Sig1), lower.tail = F)
+    ) -> Ta
+    colnames(Ta) <- c("cutoff", "Significant-Traits", "Significant-SNPs", "Significant-Pairs", "Overlap-Traits", "Severe-Traits", "Nonsevere-Traits", "Enriched with severe-realted pathway", "Enriched with nonsevere-realted pathway", "enrichwith pathway")
+    return(Ta)
+  })) -> Ta
+  Ta$Min_NY <- i
+  return(Ta)
+})) -> res
+
+openxlsx::write.xlsx(res, "./Hypergeometric_of_significant_pairs.xlsx")
+
+```
+

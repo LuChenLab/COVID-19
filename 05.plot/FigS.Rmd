@@ -1,0 +1,613 @@
+---
+title: "Supplementary File: The normalization and association study of 117 clinical traits"
+output:
+    pdf_document:
+        toc: true
+        number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, fig.align = 'center')
+```
+
+\pagebreak
+
+&nbsp;&nbsp;&nbsp;&nbsp;For each trait, we performed normalization and association study (see methods). QQ-plot (Quantile-Quantile) was used to check the normality of the distribution of the trait before (a and b) and after normalization (c and d). The raw data (b) were transformed to obtain a normal distribution using an inverse normal transformation (e). Boxplots of the trait in nonsevere and severe COVID-19 patients before (c) and after (f) normalization, Wilcoxon test and T-test were used to test the significance between two groups, respectively. (g-h). Manhattan plot for the association tests between genetic variants and the trait using T-test (g) or Pearson correlation (h). Variants with P value < 0.05 were labeled; Direction in (g) shows a higher mean value (“up” colored in orange) or lower mean value (“down” colored in green) in severe group. Similarly, positive correlation (colored in orange) and negative correlation (colored in green) were marked in (h). (i) The boxplot illustrates the sorted the trait values after normalization in 35 genotypes.
+
+\pagebreak
+
+```{r echo=FALSE}
+library(ggplot2)
+library(ggpubr)
+library(ggpmisc)
+library(cowplot)
+library(readxl)
+library(data.table)
+library(openxlsx)
+library(RColorBrewer)
+library(parallel)
+
+Cutoff <- 0.2
+
+geno <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Genotype_Table.xlsx"))
+pheno <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno.xlsx"))
+pheno0 <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Raw_pheno.xlsx"))
+Patient <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Patient_information.xlsx"))
+Sichuan <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Sichuan_20200228_V1.xlsx"))
+
+pheno1 <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Normalized_pheno_tu.xlsx"))
+colnames(pheno1) <- gsub("\\.", " ", colnames(pheno1))
+
+Cor_res <- as.data.table(read.xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/Analysis/analysis/Clinical_Featuers/20200515_v1/Cor_res.xlsx"))
+Cor_res[, PhenoType := gsub("\\.", " ", PhenoType)]
+
+
+traits <- as.data.table(read_xlsx("/Users/tangchao/Documents/PhD/Project/2019-nCov/DocumentFromZhou/20200514_Edited/Clinical_traits.xlsx"))
+traits <- traits[, .(Trait, `Functional classification`)]
+```
+
+```{r echo=FALSE}
+Func1 <- function(x) {
+  ifelse(grepl(":D", x), as.numeric(strsplit(x, "-")[[1]][1]), as.numeric(gsub("[ACGT]", "", x)))
+}
+
+PlotFunc_A <- function(j) {
+  Tab0 <- na.omit(data.table(before = as.numeric(pheno0[, j, with = FALSE][[1]])))
+  ggplot(Tab0, aes(sample = before)) + 
+    geom_qq(pch = 16, colour = "#377EB8") + 
+    geom_qq_line(colour = "grey80", lty = 2) + 
+    guides(color = FALSE) + 
+    labs(x = "Theoretical", y = "Sample") + 
+    theme_classic() + 
+    theme(axis.title = element_text(size = 22), 
+          axis.text = element_text(size = 16))
+}
+
+PlotFunc_B <- function(j) {
+  Tab0 <- na.omit(data.table(before = as.numeric(pheno0[, j, with = FALSE][[1]])))
+  
+  ggplot(Tab0, aes(before)) + 
+    geom_histogram(fill = RColorBrewer::brewer.pal(n = 8, name = "Set1")[2]) + 
+    # scale_fill_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Set1")[2:1]) + 
+    guides(fill = F) + 
+    theme_half_open() + 
+    labs(x = colnames(pheno)[j], y = "Frequency") + 
+    theme(axis.title = element_text(size = 22), 
+          axis.text = element_text(size = 16))
+}
+
+
+PlotFunc_C <- function(j) {
+  Tab0 <- na.omit(data.table(after = as.numeric(pheno[, j, with = FALSE][[1]])))
+  
+  ggplot(Tab0, aes(sample = after)) + 
+    geom_qq(pch = 16, colour = "#377EB8") + 
+    geom_qq_line(colour = "grey80", lty = 2) + 
+    labs(x = "Theoretical", y = "Sample") + 
+    guides(color = FALSE) + 
+    theme_classic() + 
+    theme(axis.title = element_text(size = 22), 
+          axis.text = element_text(size = 16))
+}
+
+PlotFunc_D <- function(j) {
+  Tab0 <- na.omit(data.table(after = as.numeric(pheno[, j, with = FALSE][[1]])))
+  
+  ggplot(Tab0, aes(after)) + 
+    geom_histogram(fill = RColorBrewer::brewer.pal(n = 8, name = "Set1")[2]) + 
+    # scale_fill_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Set1")[2:1]) + 
+    guides(fill = F) + 
+    theme_half_open() + 
+    labs(x = colnames(pheno)[j], y = "Frequency") + 
+    theme(axis.title = element_text(size = 22), 
+          axis.text = element_text(size = 16))
+}
+
+
+PlotFunc_E <- function(j) {
+  Tab2 <- na.omit(merge(pheno0[, c(1, 2, j), with = F], Sichuan[, .(Name, Gender, Type)], by.x = c("Name", "Gender"), by.y = c("Name", "Gender")))
+  colnames(Tab2)[3:4] <- c("y", "Grading")
+  Tab2[, Grading := factor(Grading, levels = c("Nonsevere", "Severe"))]
+  
+  ggplot(Tab2, aes(x = Grading, y = y, colour = Grading)) + 
+    geom_boxplot(width = 0.3) + 
+    guides(color = FALSE) + 
+    geom_jitter(height = 0, width = 0.3) + 
+    stat_compare_means(size = 6) + 
+    labs(y = colnames(pheno)[j]) + 
+    theme_classic() + 
+    theme(legend.position = "none", 
+          axis.title.x = element_blank(), 
+          axis.text.y = element_text(size = 16), 
+          axis.title = element_text(size = 22), 
+          axis.text.x = element_text(size = 22))
+}
+
+
+PlotFunc_F <- function(j) {
+  Tab <- na.omit(merge(pheno[, c(1, 2, j), with = F], Sichuan[, .(Name, Gender, Type)], by.x = c("Name", "Gender"), by.y = c("Name", "Gender")))
+  colnames(Tab)[3:4] <- c("y", "Grading")
+  Tab[, Grading := factor(Grading, levels = c("Nonsevere", "Severe"))]
+  
+  ggplot(Tab, aes(x = Grading, y = y, colour = Grading)) + 
+    geom_boxplot(width = 0.3) + 
+    guides(color = FALSE) + 
+    geom_jitter(height = 0, width = 0.3) + 
+    stat_compare_means(size = 6, method = "t.test") + 
+    labs(y = colnames(pheno)[j]) + 
+    theme_classic() + 
+    theme(legend.position = "none", 
+          axis.title.x = element_blank(), 
+          axis.text.y = element_text(size = 16), 
+          axis.title = element_text(size = 22), 
+          axis.text.x = element_text(size = 22))
+}
+
+
+PlotFunc_G <- function(j) {
+  Tab <- na.omit(merge(geno, pheno1[, c(1, j - 2), with = F], by = "PatientID"))
+  lapply(gt, function(i) {
+    v <- Tab[[ncol(Tab)]][Tab[[i]] > Cutoff]
+    
+    if(length(v) > 0) {
+      y <- data.table(y = v, Genotype = colnames(Tab)[i])
+    } else {
+      y <- NULL
+    }
+    return(y)
+  }) -> Mat
+  
+  Mat <- do.call(rbind, Mat)
+  od <- Mat[, median(y), by = "Genotype"][order(V1), Genotype]
+  
+  Mat[, Genotype := factor(Genotype, levels = od)]
+  
+  ggplot(Mat, aes(x = Genotype, y = y, colour = Genotype)) + 
+    geom_boxplot(outlier.shape = NA, width = 0.6) + 
+    geom_jitter(height = 0.1, width = 0.1) + 
+    scale_color_manual(values = colorRampPalette(rev(brewer.pal(n = 8, name = "Dark2")))(length(od))) + 
+    guides(colour = FALSE) + 
+    labs(y = tail(colnames(Tab), 1)) + 
+    theme_classic() + 
+    theme(axis.text.x = element_text(angle = 45, hjust = 1), 
+          axis.title = element_text(size = 22), 
+          axis.title.x = element_blank(), 
+          axis.text = element_text(size = 16))
+}
+
+
+PlotFunc_H <- function(j) {
+  i <- colnames(pheno)[j]
+  Tab <- Cor_res[PhenoType == i, ]
+  Tab$start <- mapply(Tab$Genotype, FUN = Func1)
+  Tab[, Z := Mean_Y - Mean_N]
+  
+  Tab[, Direction := ifelse(Mean_Y > Mean_N, "Up", "Down")]
+  Tab[, Direction := factor(Direction, levels = c("Up", "Down"))]
+  
+  ggplot(Tab[!is.na(t.test.p), ], aes(x = start, y = -log10(t.test.p), colour = Direction, size = abs(Z))) + 
+    geom_point() + 
+    geom_text_repel(data = Tab[t.test.p < 0.05, ], aes(label = Genotype)) + 
+    guides(colour = guide_legend(title = "Direction", override.aes = list(size = 5))) + 
+    scale_color_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1]) + 
+    labs(x = "Coordinate", y = "-log10(T-test P)") + 
+    # geom_hline(yintercept = -log10(0.05), lty = 2) + 
+    scale_x_continuous(breaks = c(0, 10000, 20000, 29903), labels = c(0, 10000, 20000, 29903)) + 
+    theme_classic() + 
+    theme(axis.title = element_text(size = 22), 
+          axis.text = element_text(size = 16), 
+          legend.title = element_text(size = 22), 
+          legend.text = element_text(size = 16))
+}
+
+
+PlotFunc_I <- function(j) {
+  i <- colnames(pheno)[j]
+  Tab <- Cor_res[PhenoType == i, ]
+  Tab$start <- mapply(Tab$Genotype, FUN = Func1)
+  Tab[, Z := Mean_Y - Mean_N]
+  
+  Tab[, Correlation := ifelse(CorCoef_all > 0, "Positive", "Negative")]
+  Tab[, Correlation := factor(Correlation, levels = c("Positive", "Negative"))]
+  
+  ggplot(Tab[!is.na(CorPva_all), ], aes(x = start, y = -log10(CorPva_all), colour = Correlation, size = abs(CorCoef_all))) + 
+    geom_point() + 
+    geom_text_repel(data = Tab[CorPva_all < 0.05, ], aes(label = Genotype)) + 
+    scale_color_manual(values = RColorBrewer::brewer.pal(n = 8, name = "Dark2")[2:1]) + 
+    guides(size = guide_legend("abs(cor)")) + 
+    guides(colour = guide_legend(title = "Direction", override.aes = list(size = 5))) + 
+    labs(x = "Coordinate", y = "-log10(Correlation P)") + 
+    # geom_hline(yintercept = -log10(0.05), lty = 2) + 
+    scale_x_continuous(breaks = c(0, 10000, 20000, 29903), labels = c(0, 10000, 20000, 29903)) + 
+    theme_classic() + 
+    theme(axis.title = element_text(size = 22), 
+          axis.text = element_text(size = 16), 
+          legend.title = element_text(size = 22), 
+          legend.text = element_text(size = 16))
+}
+```
+
+```{r echo=FALSE}
+gt <- 2:ncol(geno)
+```
+
+
+## Blood routine
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Blood routine", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Clinical feature
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Clinical feature", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Clinical prediction
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Clinical prediction", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+
+## Coagulation function
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Coagulation function", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Electrolyte balance
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Electrolyte balance", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Fat metabolism
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Fat metabolism", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Glycometabolism
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Glycometabolism", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Heart function
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Heart function", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Immune function
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Immune function", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Kidney function
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Kidney function", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Liver function
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Liver function", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Lung CT
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Lung CT", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Respiratory function
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Respiratory function", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
+## Urine Routine
+
+```{r echo=FALSE, fig.width=15, fig.height=18}
+pt <- which(colnames(pheno) %in% traits[`Functional classification` == "Urine Routine", Trait])
+
+library(RColorBrewer)
+library(ggrepel)
+
+for(j in pt) {
+  pA <- PlotFunc_A(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pB <- PlotFunc_B(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pC <- PlotFunc_C(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pD <- PlotFunc_D(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pE <- PlotFunc_E(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pF <- PlotFunc_F(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pG <- PlotFunc_G(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pH <- PlotFunc_H(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+  pI <- PlotFunc_I(j = j) + theme(plot.margin = unit(c(1, 1, 1, 1), units = "cm"))
+
+  PU <- ggstatsplot::combine_plots(pA, pB, pE, pC, pD, pF, nrow = 2,  labels = letters[1:6], label_size = 30)
+  PM <- ggstatsplot::combine_plots(pH, pI, nrow = 1,  labels = letters[7:8], label_size = 30)
+  PD <- ggstatsplot::combine_plots(pG, ncol = 1,  labels = letters[9], label_size = 30)
+
+  print(ggstatsplot::combine_plots(PU, PM, PD, ncol = 1, rel_heights = c(2.5, 1, 1), title.text = colnames(pheno)[j], title.size = 30))
+}
+```
+
