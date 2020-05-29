@@ -11,7 +11,7 @@ This repository contains the main scripts necessary to reproduce the analyses an
 
 SARS-CoV-2 virus that causes COVID-19 pandemic is undergoing constant mutation. Despite extensive efforts to characterize its genetic diversity, the relationship between observed viral genomic variation and clinical outcome is largely unknown. We sought to address these questions through an integrative approach combining epidemiology, virus genome sequencing, clinical phenotyping and experimental validation. Bringing together 20 hospitals and institutes in two provinces in China, we implemented a Nanopore sequencing method to generate 141 SARS-CoV-2 genomes from 88 patients from eight cities in Sichuan, and validate the variants in 169 samples from 160 patients from Hubei. Within our dataset we identified 35 variants found in multiple SARS-CoV-2 genomes and found 7 genetic variants that are associated with clinical traits which correlate with COVID-19 severity. Our virologic surveillance characterized recurrent genetic diversity, and identified mutations of biological and clinical importance, which collectively will aid molecular diagnostics and vaccine design and may inform patient management.
 
-![Graphical abstract](05.plot/Fig3.pdf)
+![Graphical abstract](05.plot/Fig3.jpg)
 
 ## Dependencies
 
