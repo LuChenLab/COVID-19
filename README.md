@@ -44,6 +44,6 @@ SARS-CoV-2 virus that causes COVID-19 pandemic is undergoing constant mutation. 
 
 ## Reference
 
-1. Ordered quantile normalization: a semiparametric transformation built for the cross-validation era.” *Journal of Applied Statistics*, 1-16. doi: [10.1080/02664763.2019.1630372](https://doi.org/10.1080/02664763.2019.1630372).
+1. Ordered quantile normalization: a semiparametric transformation built for the cross-validation era. *Journal of Applied Statistics*, 1-16. doi: [10.1080/02664763.2019.1630372](https://doi.org/10.1080/02664763.2019.1630372).
 2. Subramanian, A. *et al.* Gene set enrichment analysis: A knowledge-based approach for interpreting genome-wide expression profiles. *Proceedings of the National Academy of Sciences* **102**, 15545, doi:10.1073/pnas.0506580102 (2005).
 
